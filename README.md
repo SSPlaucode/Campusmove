@@ -1,7 +1,7 @@
-# CampusMove v3 — Setup Guide
+# CampusMove — Setup Guide
 Smart Campus Hackathon 2026 | Team Bytes | Problem Statement G
 
-## What's new in v3
+## What's in Campusmove
 - Socket.IO real-time (replaced polling)
 - OpenStreetMap with SAU campus coordinates + live auto positions
 - Auto GPS simulation (on-trip autos drift every 8s)
