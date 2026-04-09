@@ -1,175 +1,175 @@
 import React, { useState, useEffect, useRef } from 'react';
-import './index.css';
-import StudentApp from './components/StudentApp';
-import AdminApp from './components/AdminApp';
 import { io } from 'socket.io-client';
+import AuthScreen  from './AuthScreen';
+import StudentApp  from './StudentApp';
+import AdminApp    from './AdminApp';
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
-// ── Offline cache helpers ─────────────────────────────────────────────────────
-const CACHE_KEY = 'campusmove_state_cache';
-function saveCache(state) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ state, ts: Date.now() })); } catch {}
-}
-function loadCache() {
+// ── Role detection ────────────────────────────────────────────────────────────
+// Decode JWT payload WITHOUT verifying signature (verification happens server-side).
+function decodeJWT(token) {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    // Check expiry
+    if (payload.exp && payload.exp * 1000 < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 export default function App() {
-  const [view, setView] = useState('student');
-  const [state, setState] = useState(() => loadCache()?.state || null);
-  const [connected, setConnected] = useState(false);
-  const [offline, setOffline] = useState(false);
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [studentToken, setStudentToken] = useState(() => {
+    const t = localStorage.getItem('cm_student_token');
+    return t && decodeJWT(t) ? t : null;
+  });
+  const [studentName,  setStudentName]  = useState(() => localStorage.getItem('cm_student_name')  || '');
+  const [studentEmail, setStudentEmail] = useState(() => localStorage.getItem('cm_student_email') || '');
+
+  const [adminToken, setAdminToken] = useState(null);
+
+  // Which view is the user in: 'student' | 'admin_login' | 'admin'
+  // Students land on 'student' automatically after auth.
+  // Admins must go to /admin (or tap a hidden link) to get the admin login screen.
+  const [view, setView] = useState(() => {
+    // If URL has #admin, show admin login
+    if (window.location.hash === '#admin') return 'admin_login';
+    return studentToken ? 'student' : 'auth';
+  });
+
+  // ── App data ────────────────────────────────────────────────────────────────
+  const [state, setState] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [adminToken, setAdminToken] = useState(sessionStorage.getItem('cm_admin_token') || null);
+  const [offline, setOffline] = useState(false);
   const socketRef = useRef(null);
 
   useEffect(() => {
-    // ── Socket.IO connection ──────────────────────────────────────────────────
-    const socket = io(BACKEND, { transports: ['websocket', 'polling'] });
+    fetchState();
+    const socket = io(BACKEND);
     socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setConnected(true);
-      setOffline(false);
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-      setOffline(true);
-    });
-
-    socket.on('init', ({ data }) => {
-      setState(data);
-      saveCache(data);
-      setLastUpdate(new Date());
-      setOffline(false);
-    });
-
-    socket.on('state_update', ({ data }) => {
-      setState(data);
-      saveCache(data);
-      setLastUpdate(new Date());
-    });
-
-    // Fallback poll if socket drops
-    const poll = setInterval(async () => {
-      if (socket.connected) return;
-      try {
-        const res = await fetch(`${BACKEND}/api/state`);
-        const data = await res.json();
-        setState(data);
-        saveCache(data);
-        setLastUpdate(new Date());
-        setOffline(false);
-      } catch {
-        setOffline(true);
-      }
-    }, 6000);
-
-    return () => {
-      socket.disconnect();
-      clearInterval(poll);
-    };
+    socket.on('init',         ({ data }) => { setState(data); setLastUpdate(new Date()); setOffline(false); });
+    socket.on('state_update', ({ data }) => { setState(data); setLastUpdate(new Date()); setOffline(false); });
+    socket.on('disconnect', () => setOffline(true));
+    return () => socket.disconnect();
   }, []);
 
-  const refetch = async () => {
+  async function fetchState() {
     try {
       const res = await fetch(`${BACKEND}/api/state`);
-      const data = await res.json();
-      setState(data);
-      saveCache(data);
-      setLastUpdate(new Date());
-    } catch {}
-  };
+      if (res.ok) { setState(await res.json()); setLastUpdate(new Date()); setOffline(false); }
+    } catch { setOffline(true); }
+  }
 
-  const handleLogin = (token) => {
-    setAdminToken(token);
-    sessionStorage.setItem('cm_admin_token', token);
-  };
-
-  const handleLogout = () => {
-    setAdminToken(null);
-    sessionStorage.removeItem('cm_admin_token');
+  // ── Auth handlers ───────────────────────────────────────────────────────────
+  function handleStudentAuth(token, name, email) {
+    setStudentToken(token);
+    setStudentName(name);
+    setStudentEmail(email);
     setView('student');
-  };
+  }
 
-  return (
-    <div style={{ minHeight: '100vh' }}>
-      {/* Offline banner */}
-      {offline && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999,
-          background: 'rgba(255,77,109,0.95)', padding: '8px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          fontSize: 13, fontWeight: 500, color: '#fff',
-          backdropFilter: 'blur(10px)',
-        }}>
-          <span>⚠️</span>
-          Offline — showing last known data
-          {loadCache()?.ts && (
-            <span style={{ opacity: 0.7, fontSize: 11 }}>
-              (as of {new Date(loadCache().ts).toLocaleTimeString()})
-            </span>
-          )}
-        </div>
-      )}
+  function handleStudentLogout() {
+    localStorage.removeItem('cm_student_token');
+    localStorage.removeItem('cm_student_name');
+    localStorage.removeItem('cm_student_email');
+    setStudentToken(null);
+    setStudentName('');
+    setStudentEmail('');
+    setView('auth');
+  }
 
-      {/* Nav */}
-      <nav style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 24px', borderBottom: '1px solid var(--border)',
-        background: 'rgba(10,10,15,0.85)', backdropFilter: 'blur(20px)',
-        position: 'sticky', top: offline ? 37 : 0, zIndex: 100,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>🚌</div>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18, letterSpacing: '-0.5px', color: 'var(--text)' }}>
-            Campus<span style={{ color: 'var(--amber)' }}>Move</span>
+  function handleAdminLogin(token) {
+    setAdminToken(token);
+    setView('admin');
+  }
+
+  function handleAdminLogout() {
+    setAdminToken(null);
+    setView('admin_login');
+    // Clear hash so a page refresh doesn't bounce back to admin
+    window.location.hash = '#admin';
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  // Student auth screen
+  if (view === 'auth') {
+    return (
+      <AppShell>
+        <AuthScreen backend={BACKEND} onAuth={handleStudentAuth} />
+        {/* Hidden admin entry — plain text link, no obvious button */}
+        <div style={{ position: 'fixed', bottom: 12, right: 16 }}>
+          <span
+            onClick={() => setView('admin_login')}
+            style={{ fontSize: 10, color: 'var(--text-faint)', cursor: 'pointer', opacity: 0.4, userSelect: 'none' }}
+          >
+            admin
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
-            borderRadius: 20,
-            background: connected ? 'var(--green-dim)' : 'var(--red-dim)',
-            border: `1px solid ${connected ? 'rgba(0,229,160,0.3)' : 'rgba(255,77,109,0.3)'}`,
-          }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: connected ? 'var(--green)' : 'var(--red)', animation: connected ? 'blink 2s infinite' : 'none' }} />
-            <span style={{ fontSize: 11, fontWeight: 500, color: connected ? 'var(--green)' : 'var(--red)' }}>
-              {connected ? 'LIVE' : 'OFFLINE'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', borderRadius: '10px', background: 'var(--surface)', border: '1px solid var(--border)', overflow: 'hidden' }}>
-            {['student', 'admin'].map(v => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: '6px 14px', fontSize: 12, fontWeight: 600,
-                fontFamily: 'var(--font-display)', letterSpacing: '0.5px',
-                textTransform: 'uppercase', cursor: 'pointer', border: 'none',
-                background: view === v ? 'var(--amber)' : 'transparent',
-                color: view === v ? '#0a0a0f' : 'var(--text-dim)', transition: 'all 0.2s',
-              }}>{v}</button>
-            ))}
-          </div>
-          {adminToken && (
-            <button onClick={handleLogout} style={{
-              padding: '6px 12px', fontSize: 11, fontWeight: 600,
-              fontFamily: 'var(--font-display)', cursor: 'pointer',
-              border: '1px solid var(--border)', borderRadius: 8,
-              background: 'transparent', color: 'var(--text-faint)',
-            }}>Logout</button>
-          )}
-        </div>
-      </nav>
+      </AppShell>
+    );
+  }
 
-      {view === 'student'
-        ? <StudentApp state={state} backend={BACKEND} onRefetch={refetch} lastUpdate={lastUpdate} offline={offline} />
-        : <AdminApp state={state} backend={BACKEND} onRefetch={refetch} adminToken={adminToken} onLogin={handleLogin} />
-      }
+  // Student app — only rendered when student is logged in
+  if (view === 'student') {
+    return (
+      <AppShell>
+        <StudentApp
+          state={state}
+          backend={BACKEND}
+          onRefetch={fetchState}
+          lastUpdate={lastUpdate}
+          offline={offline}
+          studentToken={studentToken}
+          studentName={studentName}
+          onLogout={handleStudentLogout}
+        />
+      </AppShell>
+    );
+  }
+
+  // Admin login screen — completely separate, no student UI
+  if (view === 'admin_login') {
+    return (
+      <AppShell>
+        <AdminApp
+          state={state}
+          backend={BACKEND}
+          onRefetch={fetchState}
+          adminToken={null}
+          onLogin={handleAdminLogin}
+          onLogout={handleAdminLogout}
+        />
+      </AppShell>
+    );
+  }
+
+  // Admin dashboard — only rendered when admin is logged in
+  if (view === 'admin') {
+    return (
+      <AppShell>
+        <AdminApp
+          state={state}
+          backend={BACKEND}
+          onRefetch={fetchState}
+          adminToken={adminToken}
+          onLogin={handleAdminLogin}
+          onLogout={handleAdminLogout}
+        />
+      </AppShell>
+    );
+  }
+
+  return null;
+}
+
+// Minimal wrapper — keeps global styles in one place
+function AppShell({ children }) {
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}>
+      {children}
     </div>
   );
 }

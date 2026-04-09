@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');  // npm install bcryptjs
 
 const app = express();
 const server = http.createServer(app);
@@ -14,7 +15,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'campusmove_secret_2026';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'bytes2026';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'bytes2026';  // set via env var in production
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgressp@localhost:5432/campusmove',
@@ -25,6 +26,13 @@ async function initDB() {
   const client = await pool.connect();
   try {
     await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS autos (
         id SERIAL PRIMARY KEY,
         driver_name TEXT NOT NULL,
@@ -38,6 +46,7 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS trips (
         id SERIAL PRIMARY KEY,
         student_name TEXT NOT NULL,
+        student_id INTEGER REFERENCES users(id),
         pickup TEXT NOT NULL,
         dropoff TEXT NOT NULL,
         auto_id INTEGER REFERENCES autos(id),
@@ -56,11 +65,12 @@ async function initDB() {
       );
     `);
 
-    // Add new columns if upgrading from v1
+    // Add new columns if upgrading from v1/v2
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS vehicle_type TEXT DEFAULT 'petrol'`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT true`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION DEFAULT 28.5244`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION DEFAULT 77.1855`);
+    await client.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS student_id INTEGER REFERENCES users(id)`);
 
     const { rows } = await client.query('SELECT COUNT(*) as c FROM autos');
     if (parseInt(rows[0].c) === 0) {
@@ -112,7 +122,6 @@ function getDemandForecast() {
   }
   const nextPeak = forecast.find(f => f.demand_level === 'high');
   const currentDemand = DEMAND_PATTERN[currentHour] || 0;
-  // Confidence based on hour — more training data around peak hours
   const confidence = currentDemand >= 10 ? 91 : currentDemand >= 5 ? 84 : 76;
   return {
     forecast,
@@ -124,7 +133,6 @@ function getDemandForecast() {
 }
 
 // ── Auto GPS Simulation ───────────────────────────────────────────────────────
-// SAU campus bounding box — autos drift slightly every 8 seconds
 const SAU_CENTER = { lat: 28.5244, lng: 77.1855 };
 const DRIFT = 0.0008;
 
@@ -166,14 +174,102 @@ function broadcast() {
   getState().then(state => io.emit('state_update', { data: state }));
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+// Admin: password-based JWT, role = 'admin'
 function adminAuth(req, res, next) {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorised' });
-  try { jwt.verify(token, JWT_SECRET); next(); }
-  catch { res.status(403).json({ error: 'Invalid token' }); }
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.role !== 'admin') return res.status(403).json({ error: 'Not an admin' });
+    req.admin = payload;
+    next();
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' });
+  }
 }
 
+// Student: email/password JWT, role = 'student'
+function studentAuth(req, res, next) {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Please log in to book a ride' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.role !== 'student') return res.status(403).json({ error: 'Not a student account' });
+    req.student = payload;   // { id, name, email, role }
+    next();
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token — please log in again' });
+  }
+}
+
+// ── Student Auth Routes ───────────────────────────────────────────────────────
+
+// Register: POST /api/auth/register  { name, email, password }
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name?.trim() || !email?.trim() || !password)
+    return res.status(400).json({ error: 'All fields are required' });
+
+  // Enforce SAU email domain
+  if (!email.toLowerCase().endsWith('@sau.int') && !email.toLowerCase().endsWith('@student.sau.int'))
+    return res.status(400).json({ error: 'Please use your SAU email address (@sau.int)' });
+
+  if (password.length < 6)
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    const { rows } = await pool.query(
+      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
+      [name.trim(), email.toLowerCase().trim(), hash]
+    );
+    const user = rows[0];
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: 'student' },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ ok: true, token, name: user.name, email: user.email });
+  } catch (e) {
+    if (e.code === '23505')   // Postgres unique violation
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Login: POST /api/auth/login  { email, password }
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email?.trim() || !password)
+    return res.status(400).json({ error: 'Email and password required' });
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email.toLowerCase().trim()]
+    );
+    if (!rows.length)
+      return res.status(401).json({ error: 'No account found with this email' });
+
+    const user = rows[0];
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match)
+      return res.status(401).json({ error: 'Incorrect password' });
+
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: 'student' },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ ok: true, token, name: user.name, email: user.email });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Admin Auth Route ──────────────────────────────────────────────────────────
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
   if (password !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Invalid password' });
@@ -189,10 +285,18 @@ app.get('/api/state', async (req, res) => {
 
 app.get('/api/forecast', (req, res) => res.json(getDemandForecast()));
 
-app.post('/api/trip/request', async (req, res) => {
-  const { student_name, pickup, dropoff } = req.body;
-  if (!student_name || !pickup || !dropoff)
-    return res.status(400).json({ error: 'Missing fields' });
+// ── Trip Request — now requires student JWT ───────────────────────────────────
+app.post('/api/trip/request', studentAuth, async (req, res) => {
+  const { pickup, dropoff } = req.body;
+  // student_name and student_id come from the verified JWT — not from the request body
+  const student_name = req.student.name;
+  const student_id   = req.student.id;
+
+  if (!pickup || !dropoff)
+    return res.status(400).json({ error: 'Please select pickup and drop-off points' });
+
+  if (pickup === dropoff)
+    return res.status(400).json({ error: 'Pickup and drop-off cannot be the same stop' });
 
   const client = await pool.connect();
   try {
@@ -202,12 +306,12 @@ app.post('/api/trip/request', async (req, res) => {
     );
     if (!autoRes.rows.length) {
       await client.query('ROLLBACK');
-      return res.status(503).json({ error: 'No autos available' });
+      return res.status(503).json({ error: 'No autos available right now' });
     }
     const auto = autoRes.rows[0];
     const tripRes = await client.query(
-      'INSERT INTO trips (student_name,pickup,dropoff,auto_id,status) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-      [student_name, pickup, dropoff, auto.id, 'confirmed']
+      'INSERT INTO trips (student_name, student_id, pickup, dropoff, auto_id, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [student_name, student_id, pickup, dropoff, auto.id, 'confirmed']
     );
     await client.query(
       "UPDATE autos SET status='on_trip', location=$1 WHERE id=$2",
@@ -308,6 +412,5 @@ io.on('connection', async (socket) => {
 initDB().then(() => {
   server.listen(PORT, () => {
     console.log(`🚌 CampusMove running on :${PORT}`);
-    console.log(`🔐 Admin password: ${ADMIN_PASSWORD}`);
   });
 }).catch(e => { console.error('DB init failed:', e.message); process.exit(1); });
