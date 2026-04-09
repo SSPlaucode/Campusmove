@@ -1,328 +1,437 @@
 import React, { useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
-// AdminApp — only rendered when App.js has confirmed role === 'admin'
-// Students never see this component at all.
+const VALID_ROUTES = [
+  { pickup: 'Main Gate 1',       dropoff: 'Gaushala Road'     },
+  { pickup: 'Main Gate 1',       dropoff: 'Rajpur Khurd Road' },
+  { pickup: 'Main Gate 2',       dropoff: 'Gaushala Road'     },
+  { pickup: 'Main Gate 2',       dropoff: 'Rajpur Khurd Road' },
+  { pickup: 'Gaushala Road',     dropoff: 'Main Gate 1'       },
+  { pickup: 'Gaushala Road',     dropoff: 'Main Gate 2'       },
+  { pickup: 'Rajpur Khurd Road', dropoff: 'Main Gate 1'       },
+  { pickup: 'Rajpur Khurd Road', dropoff: 'Main Gate 2'       },
+];
 
 export default function AdminApp({ state, backend, onRefetch, adminToken, onLogin, onLogout }) {
-  const [updating, setUpdating] = useState(false);
-  const [eta, setEta] = useState('');
-  const [peak, setPeak] = useState('');
-  const [msg, setMsg] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
+  if (!adminToken) return <AdminLogin backend={backend} onLogin={onLogin} />;
+  return <AdminDashboard state={state} backend={backend} onRefetch={onRefetch} adminToken={adminToken} onLogout={onLogout} />;
+}
 
-  // ── Login helpers ─────────────────────────────────────────────────────────
-  async function handleLogin() {
-    if (!password.trim()) return;
-    setLoggingIn(true); setLoginError('');
+// ── Admin Login ───────────────────────────────────────────────────────────────
+function AdminLogin({ backend, onLogin }) {
+  const [password, setPassword] = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+
+  const handleLogin = async () => {
+    setLoading(true); setError('');
     try {
       const res = await fetch(`${backend}/api/admin/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
       const data = await res.json();
-      if (!res.ok) setLoginError(data.error || 'Login failed');
+      if (!res.ok) setError(data.error || 'Invalid password');
       else onLogin(data.token);
-    } catch { setLoginError('Could not connect to server'); }
-    setLoggingIn(false);
-  }
+    } catch { setError('Could not connect to server'); }
+    setLoading(false);
+  };
 
-  // ── Login screen — NO password hints ─────────────────────────────────────
-  if (!adminToken) {
-    return (
-      <div style={{ maxWidth: 380, margin: '80px auto', padding: '0 20px' }}>
-        <div style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 24, padding: '36px 28px', animation: 'float-up 0.5s ease both',
-        }}>
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🔐</div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22, color: 'var(--text)', marginBottom: 6 }}>
-              Admin Access
-            </h2>
-            <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>
-              Authorised personnel only
-            </p>
-          </div>
-
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>PASSWORD</label>
-            <input
-              type="password" value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              placeholder="Enter admin password"
-              style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-            />
-          </div>
-
-          {loginError && (
-            <div style={{
-              padding: '10px 14px', borderRadius: 10, marginBottom: 14,
-              background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.3)',
-              fontSize: 13, color: 'var(--red)',
-            }}>
-              {loginError}
-            </div>
-          )}
-
-          <button onClick={handleLogin} disabled={loggingIn}
-            style={{ ...btnStyle('var(--amber)'), width: '100%', padding: '14px' }}>
-            {loggingIn ? 'Verifying…' : 'Login →'}
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: '100%', maxWidth: 380 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ fontSize: 40, marginBottom: 10 }}>🔐</div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 26, color: 'var(--text)' }}>Admin Panel</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>CampusMove · SAU</p>
+        </div>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 24, padding: '28px 24px' }}>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleLogin()}
+            placeholder="Admin password"
+            style={{ width: '100%', padding: '12px 14px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box', marginBottom: 14 }} />
+          {error && <div style={errBox}>{error}</div>}
+          <button onClick={handleLogin} disabled={loading}
+            style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none', background: loading ? 'var(--surface2)' : 'var(--amber)', color: loading ? 'var(--text-faint)' : '#0a0a0f', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, cursor: loading ? 'not-allowed' : 'pointer' }}>
+            {loading ? 'Logging in…' : '→  Login'}
           </button>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  // ── Auth header helper ────────────────────────────────────────────────────
-  function authHeaders() {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` };
-  }
+// ── Admin Dashboard ───────────────────────────────────────────────────────────
+function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
+  const [tab, setTab] = useState('queues'); // 'queues' | 'fleet' | 'forecast' | 'drivers'
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState('');
 
-  // ── Admin actions ─────────────────────────────────────────────────────────
-  const updateState = async (payload) => {
-    setUpdating(true); setMsg('');
-    try {
-      const res = await fetch(`${backend}/api/admin/update`, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(payload),
-      });
-      if (!res.ok) { setMsg('Error — token expired? Please re-login.'); return; }
-      onRefetch();
-      setMsg('Updated ✓');
-      setTimeout(() => setMsg(''), 2500);
-    } catch { setMsg('Connection error'); }
+  const auth = { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' };
+
+  const adminPost = async (path, body) => {
+    const res = await fetch(`${backend}${path}`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  };
+
+  const handleUpdateState = async (key, value) => {
+    setUpdating(true); setError('');
+    try { await adminPost('/api/admin/update', { [key]: value }); onRefetch(); }
+    catch (e) { setError(e.message); }
     setUpdating(false);
   };
 
-  const toggleAuto = async (auto) => {
-    try {
-      const newStatus = auto.status === 'available' ? 'on_trip' : 'available';
-      await fetch(`${backend}/api/admin/auto/${auto.id}`, {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ status: newStatus, location: newStatus === 'available' ? 'gate' : 'campus' }),
-      });
-      onRefetch();
-    } catch { setMsg('Toggle failed'); }
+  const handleCompleteGroup = async (groupId) => {
+    setError('');
+    try { await adminPost(`/api/admin/group/${groupId}/complete`, {}); onRefetch(); }
+    catch (e) { setError(e.message); }
   };
 
-  const completeTrip = async (tripId) => {
-    try {
-      await fetch(`${backend}/api/trip/${tripId}/complete`, { method: 'POST', headers: authHeaders() });
-      onRefetch();
-    } catch { setMsg('Complete trip failed'); }
+  const handleDispatchNow = async () => {
+    setError('');
+    try { await adminPost('/api/admin/queue/dispatch', {}); onRefetch(); }
+    catch (e) { setError(e.message); }
   };
 
-  const autosAtGate = state ? parseInt(state.autos_at_gate || 0) : 0;
-  const forecast = state?.forecast;
-  const activeTrips = state?.trips?.filter(t => t.status === 'confirmed') || [];
-  const recentTrips = state?.trips?.filter(t => t.status === 'completed').slice(0, 10) || [];
-  const demandColor = (level) => level === 'high' ? 'var(--amber)' : level === 'normal' ? 'var(--green)' : 'var(--blue)';
+  const handleToggleAuto = async (auto) => {
+    setError('');
+    const newStatus = auto.status === 'available' ? 'offline' : 'available';
+    try { await adminPost(`/api/admin/auto/${auto.id}`, { status: newStatus, location: auto.location || 'gate' }); onRefetch(); }
+    catch (e) { setError(e.message); }
+  };
+
+  const tabs = [
+    { id: 'queues',   label: '📋 Queues'   },
+    { id: 'fleet',    label: '🛺 Fleet'    },
+    { id: 'forecast', label: '📈 Forecast' },
+    { id: 'drivers',  label: '🔑 Drivers'  },
+  ];
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 20px 80px' }}>
+    <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 16px 80px' }}>
 
       {/* Header */}
-      <div style={{ animation: 'float-up 0.5s ease both', marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 28, letterSpacing: '-1px', color: 'var(--text)' }}>
-              Control Panel
-            </h1>
-            <div style={{ padding: '3px 10px', borderRadius: 6, background: 'rgba(245,166,35,0.15)', border: '1px solid rgba(245,166,35,0.3)', fontSize: 11, fontWeight: 700, color: 'var(--amber)', fontFamily: 'var(--font-display)', letterSpacing: '1px' }}>
-              ADMIN
-            </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22, color: 'var(--text)' }}>Admin Panel</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            {state?.available_autos ?? '—'} autos available · {
+              state ? Object.values(state.queues || {}).reduce((a,b) => a + b.filter(e => e.status === 'waiting').length, 0) : '—'
+            } students waiting
           </div>
-          {/* Logout */}
-          <button onClick={onLogout} style={{
-            padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)',
-            background: 'var(--bg3)', color: 'var(--text-dim)',
-            fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 12,
-            cursor: 'pointer', letterSpacing: '0.3px',
-          }}>
-            Sign Out
-          </button>
         </div>
-        <p style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 4 }}>
-          Manage fleet, update status, monitor trips in real-time
-        </p>
+        <button onClick={onLogout} style={btnSmall}>Sign Out</button>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24, animation: 'float-up 0.5s ease 0.05s both' }}>
-        {[
-          { label: 'At Gate',      value: autosAtGate,               color: 'var(--amber)', icon: '🛺' },
-          { label: 'Active Trips', value: activeTrips.length,        color: 'var(--green)', icon: '🚦' },
-          { label: 'Total Fleet',  value: state?.autos?.length || 0, color: 'var(--blue)',  icon: '📊' },
-        ].map(s => (
-          <div key={s.label} style={{ padding: '20px 16px', borderRadius: 16, background: 'var(--surface)', border: '1px solid var(--border)', textAlign: 'center' }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{s.icon}</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 36, color: s.color, lineHeight: 1, marginBottom: 4 }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-faint)', letterSpacing: '0.5px' }}>{s.label.toUpperCase()}</div>
-          </div>
+      {error && <div style={{ ...errBox, marginBottom: 16 }}>{error}</div>}
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, padding: 4, background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)' }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ flex: 1, padding: '8px 4px', borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: tab === t.id ? 'var(--amber)' : 'transparent',
+              color: tab === t.id ? '#0a0a0f' : 'var(--text-faint)',
+              fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11, transition: 'all 0.2s' }}>
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {/* Demand Forecast */}
-      {forecast && (
-        <div style={{ animation: 'float-up 0.5s ease 0.08s both', marginBottom: 20 }}>
-          <SectionHeader>AI Demand Forecast</SectionHeader>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '20px' }}>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-              {[
-                { label: 'NEXT PEAK',         value: forecast.next_peak || 'None today', color: 'var(--amber)' },
-                { label: 'RECOMMENDED AUTOS', value: `${forecast.recommended_autos} at gate`, color: 'var(--green)' },
-                { label: 'MODEL CONFIDENCE',  value: `${forecast.model_confidence}%`, color: 'var(--blue)' },
-              ].map(stat => (
-                <div key={stat.label} style={{ padding: '12px 16px', borderRadius: 12, background: 'var(--bg3)', border: '1px solid var(--border)', flex: '1 1 120px' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '1px', marginBottom: 6 }}>{stat.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: stat.color, fontFamily: 'var(--font-display)' }}>{stat.value}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
-              {forecast.forecast?.map(f => (
-                <div key={f.hour} style={{ flex: '0 0 auto', textAlign: 'center', padding: '10px 12px', borderRadius: 10, background: 'var(--bg3)', border: `1px solid ${demandColor(f.demand_level)}33` }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 4 }}>{f.hour}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: demandColor(f.demand_level), fontFamily: 'var(--font-display)' }}>{f.predicted_trips}</div>
-                  <div style={{ fontSize: 9, color: demandColor(f.demand_level), marginTop: 2, fontWeight: 600 }}>{f.demand_level.toUpperCase()}</div>
-                </div>
-              ))}
-            </div>
+      {/* ── Queues Tab ── */}
+      {tab === 'queues' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <SectionLabel>ALL 8 ROUTE QUEUES</SectionLabel>
+            <button onClick={handleDispatchNow} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(245,166,35,0.4)', background: 'var(--amber-dim)', color: 'var(--amber)', fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 700, cursor: 'pointer' }}>
+              ⚡ Force Dispatch
+            </button>
           </div>
-        </div>
-      )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {VALID_ROUTES.map(route => {
+              const key = `${route.pickup}|${route.dropoff}`;
+              const entries = state?.queues?.[key] || [];
+              const waiting    = entries.filter(e => e.status === 'waiting');
+              const dispatched = entries.filter(e => e.status === 'dispatched');
+              const started    = entries.filter(e => e.status === 'started');
+              const hasActive  = dispatched.length > 0 || started.length > 0;
+              const groupId    = dispatched[0]?.group_id || started[0]?.group_id;
 
-      {/* Status Controls */}
-      <div style={{ animation: 'float-up 0.5s ease 0.1s both', marginBottom: 20 }}>
-        <SectionHeader>Status Controls</SectionHeader>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={labelStyle}>ETA (min)</label>
-            <input
-              type="number" value={eta} onChange={e => setEta(e.target.value)}
-              placeholder={state?.eta_minutes || '5'}
-              style={{ ...inputStyle, width: 80 }}
-            />
-            <button onClick={() => eta && updateState({ eta_minutes: eta })} style={btnStyle('var(--amber)')} disabled={updating}>Set</button>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={labelStyle}>DEMAND STATUS</label>
-            <select value={peak} onChange={e => setPeak(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
-              <option value="">Current: {state?.peak_status || 'normal'}</option>
-              <option value="normal">Normal</option>
-              <option value="high">Peak Hours</option>
-              <option value="low">Quiet</option>
-            </select>
-            <button onClick={() => peak && updateState({ peak_status: peak })} style={btnStyle('var(--blue)')} disabled={updating}>Set</button>
-          </div>
-        </div>
-        {msg && (
-          <div style={{ marginTop: 10, padding: '8px 14px', borderRadius: 8, background: msg.includes('rror') ? 'var(--red-dim)' : 'var(--green-dim)', border: `1px solid ${msg.includes('rror') ? 'rgba(255,77,109,0.3)' : 'rgba(0,229,160,0.3)'}`, fontSize: 13, color: msg.includes('rror') ? 'var(--red)' : 'var(--green)', fontWeight: 500 }}>
-            {msg}
-          </div>
-        )}
-      </div>
+              return (
+                <div key={key} style={{ background: 'var(--surface)', border: `1px solid ${hasActive ? 'rgba(245,166,35,0.4)' : 'var(--border)'}`, borderRadius: 16, padding: '16px 18px', transition: 'border 0.3s' }}>
+                  {/* Route header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                      {route.pickup} <span style={{ color: 'var(--text-faint)' }}>→</span> {route.dropoff}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {waiting.length > 0 && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 8, background: 'var(--amber-dim)', color: 'var(--amber)', border: '1px solid rgba(245,166,35,0.3)', fontWeight: 700 }}>
+                          {waiting.length} waiting
+                        </span>
+                      )}
+                      {hasActive && (
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 8, background: started.length ? 'var(--green-dim)' : 'var(--amber-dim)', color: started.length ? 'var(--green)' : 'var(--amber)', border: `1px solid ${started.length ? 'rgba(0,229,160,0.3)' : 'rgba(245,166,35,0.3)'}`, fontWeight: 700 }}>
+                          {started.length ? '▶ On Trip' : '🛺 Dispatched'}
+                        </span>
+                      )}
+                      {!waiting.length && !hasActive && (
+                        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>empty</span>
+                      )}
+                    </div>
+                  </div>
 
-      {/* Fleet Management */}
-      <div style={{ animation: 'float-up 0.5s ease 0.15s both', marginBottom: 20 }}>
-        <SectionHeader>Fleet Management</SectionHeader>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {state?.autos?.map((auto, i) => (
-            <div key={auto.id} style={{
-              padding: '14px 16px', borderRadius: 12, background: 'var(--bg3)',
-              border: '1px solid var(--border)', display: 'flex', alignItems: 'center',
-              justifyContent: 'space-between', animation: `slide-in 0.3s ease ${i * 0.04}s both`,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: 10, position: 'relative',
-                  background: auto.status === 'available' ? 'var(--green-dim)' : 'var(--amber-dim)',
-                  border: `1px solid ${auto.status === 'available' ? 'rgba(0,229,160,0.3)' : 'rgba(245,166,35,0.3)'}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-                }}>
-                  {auto.vehicle_type === 'EV' ? '⚡' : '🛺'}
-                  {auto.verified && (
-                    <div style={{ position: 'absolute', top: -4, right: -4, width: 14, height: 14, borderRadius: '50%', background: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#fff', fontWeight: 700 }}>✓</div>
+                  {/* Active group */}
+                  {hasActive && (
+                    <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 10, background: started.length ? 'var(--green-dim)' : 'var(--amber-dim)', border: `1px solid ${started.length ? 'rgba(0,229,160,0.25)' : 'rgba(245,166,35,0.25)'}` }}>
+                      <div style={{ fontSize: 11, color: started.length ? 'var(--green)' : 'var(--amber)', fontWeight: 700, marginBottom: 6 }}>
+                        {started.length ? '▶ IN PROGRESS' : '🛺 DRIVER ASSIGNED'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {[...dispatched, ...started].map(e => (
+                          <span key={e.id} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.08)', color: 'var(--text)' }}>
+                            {e.student_name}
+                          </span>
+                        ))}
+                      </div>
+                      <button onClick={() => handleCompleteGroup(groupId)}
+                        style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(0,229,160,0.4)', background: 'transparent', color: 'var(--green)', fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 700, cursor: 'pointer' }}>
+                        ✓ Mark Complete
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Waiting list */}
+                  {waiting.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {waiting.map((entry, i) => {
+                        const waitMs = Date.now() - new Date(entry.created_at).getTime();
+                        const waitMin = Math.floor(waitMs / 60000);
+                        return (
+                          <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, background: 'var(--bg3)' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', width: 20 }}>#{i+1}</span>
+                            <span style={{ fontSize: 13, color: 'var(--text)', flex: 1 }}>{entry.student_name}</span>
+                            <span style={{ fontSize: 11, color: waitMin >= 4 ? 'var(--amber)' : 'var(--text-faint)' }}>
+                              {waitMin}m ago
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Queue fill bar */}
+                  {waiting.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ height: 4, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.min((waiting.length / 4) * 100, 100)}%`, background: 'var(--amber)', borderRadius: 2, transition: 'width 0.5s' }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 4 }}>{waiting.length}/4 capacity</div>
+                    </div>
                   )}
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Fleet Tab ── */}
+      {tab === 'fleet' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <SectionLabel>FLEET MANAGEMENT</SectionLabel>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Label>ETA (min)</Label>
+              <select value={state?.eta_minutes || '8'} onChange={e => handleUpdateState('eta_minutes', e.target.value)} style={{ padding: '5px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
+                {[3,5,8,10,12,15].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <Label>Status</Label>
+              <select value={state?.peak_status || 'normal'} onChange={e => handleUpdateState('peak_status', e.target.value)} style={{ padding: '5px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
+                <option value="normal">Normal</option>
+                <option value="high">Peak</option>
+                <option value="low">Quiet</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(state?.autos || []).map(auto => (
+              <div key={auto.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: auto.status === 'available' ? 'var(--green)' : auto.status === 'on_trip' ? 'var(--amber)' : 'var(--red)', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
                     {auto.driver_name}
-                    {auto.vehicle_type === 'EV' && (
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'var(--green-dim)', color: 'var(--green)', border: '1px solid rgba(0,229,160,0.3)' }}>EV</span>
-                    )}
+                    {auto.vehicle_type === 'EV' && <span style={{ color: 'var(--green)', marginLeft: 6, fontSize: 12 }}>⚡ EV</span>}
+                    {auto.verified && <span style={{ color: 'var(--blue)', marginLeft: 6, fontSize: 11 }}>✓</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 1 }}>
-                    📍 {auto.location} · ID #{auto.id} · {auto.lat?.toFixed(4)}, {auto.lng?.toFixed(4)}
+                  <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                    {auto.status} · {auto.location || 'gate'}
                   </div>
                 </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-display)', letterSpacing: '0.5px', padding: '3px 10px', borderRadius: 20, background: auto.status === 'available' ? 'var(--green-dim)' : 'var(--amber-dim)', color: auto.status === 'available' ? 'var(--green)' : 'var(--amber)' }}>
-                  {auto.status === 'available' ? 'AVAILABLE' : 'ON TRIP'}
-                </div>
-                <button onClick={() => toggleAuto(auto)} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1px solid var(--border-bright)', background: 'var(--surface2)', color: 'var(--text-dim)', cursor: 'pointer', fontFamily: 'var(--font-display)', letterSpacing: '0.3px', transition: 'all 0.15s' }}>
-                  {auto.status === 'available' ? 'Mark Busy' : 'Mark Free'}
+                <button onClick={() => handleToggleAuto(auto)}
+                  disabled={auto.status === 'on_trip'}
+                  style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg3)', color: auto.status === 'on_trip' ? 'var(--text-faint)' : 'var(--text)', fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 600, cursor: auto.status === 'on_trip' ? 'not-allowed' : 'pointer' }}>
+                  {auto.status === 'available' ? 'Take Offline' : auto.status === 'on_trip' ? 'On Trip' : 'Bring Online'}
                 </button>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
 
-      {/* Active Trips */}
-      {activeTrips.length > 0 && (
-        <div style={{ animation: 'float-up 0.5s ease 0.2s both', marginBottom: 20 }}>
-          <SectionHeader>Active Trips</SectionHeader>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {activeTrips.map((trip, i) => (
-              <div key={trip.id} style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--amber-dim)', border: '1px solid rgba(245,166,35,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: `slide-in 0.3s ease ${i * 0.05}s both` }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>{trip.pickup} → {trip.dropoff}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, display: 'flex', gap: 8 }}>
-                    <span>👤 {trip.student_name}</span>
-                    <span>·</span>
-                    <span>Trip #{trip.id}</span>
-                    <span>·</span>
-                    <span>{new Date(trip.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          {/* Trip log */}
+          {state?.trips?.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              <SectionLabel>RECENT COMPLETED TRIPS</SectionLabel>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
+                {state.trips.slice(0, 10).map((t, i) => (
+                  <div key={t.id} style={{ padding: '10px 16px', borderBottom: i < 9 ? '1px solid var(--border)' : 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{t.student_name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{t.pickup} → {t.dropoff}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                      {t.completed_at ? new Date(t.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                    </span>
                   </div>
-                </div>
-                <button onClick={() => completeTrip(trip.id)} style={btnStyle('var(--green)')}>Complete</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Forecast Tab ── */}
+      {tab === 'forecast' && state?.forecast && (
+        <div>
+          <SectionLabel>AI DEMAND FORECAST — NEXT 6 HOURS</SectionLabel>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '20px 16px 12px', marginBottom: 16 }}>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={state.forecast.forecast} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <XAxis dataKey="hour" tick={{ fill: 'var(--text-faint)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'var(--text-faint)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}
+                  cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+                />
+                <Bar dataKey="predicted_trips" radius={[4,4,0,0]}>
+                  {state.forecast.forecast.map((f, i) => (
+                    <Cell key={i} fill={f.demand_level === 'high' ? 'var(--amber)' : f.demand_level === 'normal' ? '#4d9fff' : '#444'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {[
+              { label: 'Next Peak', value: state.forecast.next_peak || 'None' },
+              { label: 'Recommended Autos', value: state.forecast.recommended_autos },
+              { label: 'Current Demand', value: state.forecast.current_demand_level },
+              { label: 'Model Confidence', value: `${state.forecast.model_confidence}%` },
+            ].map(item => (
+              <div key={item.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>{item.label.toUpperCase()}</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22, color: 'var(--text)' }}>{item.value}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Trip Log */}
-      {recentTrips.length > 0 && (
-        <div style={{ animation: 'float-up 0.5s ease 0.25s both' }}>
-          <SectionHeader>Trip Log</SectionHeader>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {recentTrips.map((trip, i) => (
-              <div key={trip.id} style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--bg3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: `slide-in 0.3s ease ${i * 0.03}s both` }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{trip.pickup} → {trip.dropoff}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                    {trip.student_name} · {new Date(trip.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 6, background: 'var(--green-dim)', color: 'var(--green)', fontFamily: 'var(--font-display)' }}>DONE</div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* ── Drivers / PIN Tab ── */}
+      {tab === 'drivers' && (
+        <DriverPINManager autos={state?.autos || []} backend={backend} adminToken={adminToken} onRefetch={onRefetch} />
       )}
     </div>
   );
 }
 
-function SectionHeader({ children }) {
-  return <div style={{ fontSize: 11, fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '1.5px', color: 'var(--text-faint)', marginBottom: 10 }}>{children.toUpperCase()}</div>;
+// ── Driver PIN Manager ────────────────────────────────────────────────────────
+function DriverPINManager({ autos, backend, adminToken, onRefetch }) {
+  const [pins,    setPins]    = useState({});
+  const [saving,  setSaving]  = useState({});
+  const [msg,     setMsg]     = useState({});
+
+  const handleSave = async (driverId) => {
+    const pin = pins[driverId];
+    if (!pin || pin.length < 4) { setMsg(m => ({ ...m, [driverId]: 'PIN must be at least 4 digits' })); return; }
+    setSaving(s => ({ ...s, [driverId]: true }));
+    try {
+      const res = await fetch(`${backend}/api/admin/driver/${driverId}/pin`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json();
+      if (!res.ok) setMsg(m => ({ ...m, [driverId]: data.error }));
+      else {
+        setMsg(m => ({ ...m, [driverId]: '✓ PIN updated' }));
+        setPins(p => ({ ...p, [driverId]: '' }));
+        setTimeout(() => setMsg(m => ({ ...m, [driverId]: '' })), 3000);
+      }
+    } catch { setMsg(m => ({ ...m, [driverId]: 'Error saving' })); }
+    setSaving(s => ({ ...s, [driverId]: false }));
+  };
+
+  return (
+    <div>
+      <SectionLabel>DRIVER PINS</SectionLabel>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
+        Set or reset each driver's login PIN. Drivers use their PIN to access the Driver Portal.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {autos.map(auto => (
+          <div key={auto.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '14px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                  {auto.driver_name}
+                  {auto.vehicle_type === 'EV' && <span style={{ color: 'var(--green)', marginLeft: 6, fontSize: 12 }}>⚡</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Driver ID: {auto.id}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="password" inputMode="numeric" maxLength={8}
+                value={pins[auto.id] || ''}
+                onChange={e => setPins(p => ({ ...p, [auto.id]: e.target.value }))}
+                placeholder="New PIN (min 4 digits)"
+                style={{ flex: 1, padding: '9px 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' }}
+              />
+              <button onClick={() => handleSave(auto.id)} disabled={saving[auto.id]}
+                style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: 'var(--amber)', color: '#0a0a0f', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 12, cursor: saving[auto.id] ? 'not-allowed' : 'pointer' }}>
+                {saving[auto.id] ? '…' : 'Save'}
+              </button>
+            </div>
+            {msg[auto.id] && (
+              <div style={{ fontSize: 12, marginTop: 6, color: msg[auto.id].startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
+                {msg[auto.id]}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-const labelStyle = { fontSize: 11, fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '1px', color: 'var(--text-faint)', display: 'block', marginBottom: 6 };
-const inputStyle = { flex: 1, padding: '10px 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none' };
-const btnStyle = (color) => ({ padding: '10px 16px', borderRadius: 10, border: 'none', background: color, cursor: 'pointer', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: '#0a0a0f', whiteSpace: 'nowrap', letterSpacing: '0.3px' });
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const errBox = {
+  padding: '10px 14px', borderRadius: 10,
+  background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.3)',
+  fontSize: 13, color: 'var(--red)',
+};
+
+const btnSmall = {
+  padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)',
+  background: 'var(--bg3)', color: 'var(--text-faint)', fontSize: 12,
+  fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer',
+};
+
+function SectionLabel({ children }) {
+  return <div style={{ fontSize: 11, fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '1.5px', color: 'var(--text-faint)', marginBottom: 12 }}>{children}</div>;
+}
+
+function Label({ children }) {
+  return <label style={{ fontSize: 11, fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '1px', color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>{children}</label>;
+}
