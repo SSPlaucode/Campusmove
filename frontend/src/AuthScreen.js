@@ -103,7 +103,7 @@ export default function AuthScreen({ backend, onAuth }) {
               value={form.name} onChange={v => set('name', v)} />
           )}
 
-          <Field label="SAU EMAIL" type="email" placeholder="yourname@sau.int"
+          <Field label="SAU EMAIL" type="email" placeholder="yourname@students.sau.ac.in"
             value={form.email} onChange={v => set('email', v)} />
 
           <Field label="PASSWORD" type="password"
@@ -147,7 +147,7 @@ export default function AuthScreen({ backend, onAuth }) {
         {/* SAU domain note */}
         <p style={{ marginTop: 16, fontSize: 11, color: 'var(--text-faint)', textAlign: 'center', lineHeight: 1.6 }}>
           Only SAU email addresses are accepted<br />
-          <span style={{ color: 'rgba(245,166,35,0.6)' }}>@sau.int · @student.sau.int</span>
+          <span style={{ color: 'rgba(245,166,35,0.6)' }}>@students.sau.ac.in · @sau.ac.in</span>
         </p>
       </div>
     </div>
