@@ -304,6 +304,15 @@ app.post('/api/trip/request', studentAuth, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Block double-booking — student must not have an active trip
+    const activeRes = await client.query(
+      "SELECT id FROM trips WHERE student_id=$1 AND status='confirmed'",
+      [student_id]
+    );
+    if (activeRes.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'You already have an active trip. Cancel it first before booking another.' });
+    }
     const autoRes = await client.query(
       "SELECT * FROM autos WHERE status='available' LIMIT 1 FOR UPDATE"
     );
@@ -340,6 +349,34 @@ app.post('/api/trip/request', studentAuth, async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+
+// ── Student Cancel Trip ───────────────────────────────────────────────────────
+// Students can only cancel their own active (confirmed) trips
+app.post('/api/trip/:id/cancel', studentAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query('SELECT * FROM trips WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Trip not found' });
+    const trip = rows[0];
+    if (trip.student_id !== req.student.id)
+      return res.status(403).json({ error: 'You can only cancel your own trips' });
+    if (trip.status !== 'confirmed')
+      return res.status(400).json({ error: 'Only active trips can be cancelled' });
+    await client.query("UPDATE trips SET status='cancelled' WHERE id=$1", [trip.id]);
+    await client.query(
+      "UPDATE autos SET status='available', location='gate', lat=$1, lng=$2 WHERE id=$3",
+      [SAU_CENTER.lat + (Math.random()-0.5)*0.001, SAU_CENTER.lng + (Math.random()-0.5)*0.001, trip.auto_id]
+    );
+    const agRes = await client.query(
+      "SELECT COUNT(*) as c FROM autos WHERE status='available' AND location='gate'"
+    );
+    await client.query("UPDATE state SET value=$1 WHERE key='autos_at_gate'", [String(agRes.rows[0].c)]);
+    broadcast();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 
 app.get('/api/trips', async (req, res) => {

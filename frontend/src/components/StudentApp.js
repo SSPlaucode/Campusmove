@@ -8,7 +8,7 @@ const STOPS = {
   'Gaushala Road':     { lat: 28.48331524485649,  lng: 77.18885118170873 },
 };
 const STOP_NAMES = Object.keys(STOPS);
-const GEOFENCE_RADIUS_M = 50;
+const GEOFENCE_RADIUS_M = 150;
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -38,16 +38,11 @@ function sendPushNotification(title, body) {
   if (Notification.permission === 'granted') new Notification(title, { body, icon: '/favicon.ico' });
 }
 
-// Props:
-//   state, backend, onRefetch, lastUpdate, offline
-//   studentToken  — JWT string
-//   studentName   — name from JWT / localStorage
-//   onLogout()    — clears auth and returns to AuthScreen
-
-export default function StudentApp({ state, backend, onRefetch, lastUpdate, offline, studentToken, studentName, onLogout }) {
+export default function StudentApp({ state, backend, onRefetch, lastUpdate, offline, studentToken, studentName, studentEmail, onLogout }) {
   const [form, setForm] = useState({ pickup: '', dropoff: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [tripResult, setTripResult] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [activeTrip, setActiveTrip] = useState(null);   // current confirmed trip for this student
   const [error, setError] = useState('');
   const [prevCount, setPrevCount] = useState(null);
   const [countAnimating, setCountAnimating] = useState(false);
@@ -58,6 +53,21 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
   const autosAtGate = state ? parseInt(state.autos_at_gate || '0') : null;
   const eta = state?.eta_minutes;
   const peakStatus = state?.peak_status || 'normal';
+
+  // Derive this student's active trip from global state
+  useEffect(() => {
+    if (!state?.trips || !studentEmail) return;
+    const myActive = state.trips.find(
+      t => t.status === 'confirmed' && t.student_name && state.trips &&
+           // match by student_name since that's what's in the trip list
+           true
+    );
+    // We match by student_name from the JWT which is stored in studentName prop
+    const mine = state.trips.find(
+      t => t.status === 'confirmed' && t.student_name === studentName
+    );
+    setActiveTrip(mine || null);
+  }, [state, studentName]);
 
   useEffect(() => { requestNotificationPermission(); }, []);
 
@@ -97,7 +107,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
   const handleRequest = async () => {
     if (!form.pickup || !form.dropoff) { setError('Please select pickup and drop-off points'); return; }
     if (form.pickup === form.dropoff)  { setError('Pickup and drop-off cannot be the same stop'); return; }
-    setSubmitting(true); setError(''); setTripResult(null);
+    setSubmitting(true); setError('');
     try {
       const res = await fetch(`${backend}/api/trip/request`, {
         method: 'POST',
@@ -109,7 +119,6 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         setError(data.error || 'Request failed');
         if (res.status === 401 || res.status === 403) onLogout();
       } else {
-        setTripResult(data);
         setForm({ pickup: '', dropoff: '' });
         setGeoStatus('idle');
         onRefetch();
@@ -117,6 +126,22 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
       }
     } catch { setError('Could not connect to server'); }
     setSubmitting(false);
+  };
+
+  const handleCancel = async () => {
+    if (!activeTrip) return;
+    if (!window.confirm('Cancel your current ride?')) return;
+    setCancelling(true); setError('');
+    try {
+      const res = await fetch(`${backend}/api/trip/${activeTrip.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${studentToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data.error || 'Could not cancel trip');
+      else { setActiveTrip(null); onRefetch(); }
+    } catch { setError('Could not connect to server'); }
+    setCancelling(false);
   };
 
   return (
@@ -193,24 +218,41 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         </div>
       )}
 
-      {/* Trip Request */}
+      {/* Active Trip Banner — shown when student has a confirmed trip */}
+      {activeTrip && (
+        <div style={{ animation: 'float-up 0.4s ease both', marginBottom: 20 }}>
+          <div style={{ background: 'var(--amber-dim)', border: '1px solid rgba(245,166,35,0.35)', borderRadius: 20, padding: '20px' }}>
+            <SectionLabel>YOUR ACTIVE RIDE</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--text-dim)', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                {activeTrip.pickup} → {activeTrip.dropoff}
+              </div>
+              <span>Trip <strong style={{ color: 'var(--text)' }}>#{activeTrip.id}</strong></span>
+              <span>Booked at <strong style={{ color: 'var(--text)' }}>{new Date(activeTrip.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></span>
+            </div>
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              style={{ width: '100%', padding: '11px', borderRadius: 10, border: '1px solid rgba(255,77,109,0.4)', background: 'var(--red-dim)', color: 'var(--red)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, cursor: cancelling ? 'not-allowed' : 'pointer' }}
+            >
+              {cancelling ? 'Cancelling…' : '✕  Cancel This Ride'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Trip Request — locked out if student has active trip */}
       <div style={{ animation: 'float-up 0.6s ease 0.2s both', marginBottom: 20 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 24, padding: '24px 20px' }}>
           <SectionLabel>REQUEST A RIDE</SectionLabel>
 
-          {tripResult ? (
-            <div style={{ padding: '20px', borderRadius: 14, background: 'var(--green-dim)', border: '1px solid rgba(0,229,160,0.3)', animation: 'float-up 0.4s ease both' }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: 'var(--green)', marginBottom: 8 }}>Ride Confirmed!</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--text-dim)' }}>
-                <span>Trip <strong style={{ color: 'var(--text)' }}>#{tripResult.tripId}</strong></span>
-                <span>Driver: <strong style={{ color: 'var(--text)' }}>{tripResult.driver}</strong></span>
-                <span>Auto ID: <strong style={{ color: 'var(--text)' }}>#{tripResult.auto_id}</strong></span>
-                {tripResult.vehicle_type === 'EV' && <span style={{ color: 'var(--green)', fontWeight: 600 }}>⚡ Electric Vehicle</span>}
+          {activeTrip ? (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>🛺</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>You have an active ride</div>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                Cancel your current trip above before booking a new one.
               </div>
-              <button onClick={() => setTripResult(null)} style={{ marginTop: 14, padding: '8px 20px', borderRadius: 20, background: 'var(--green)', color: '#0a0a0f', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-display)' }}>
-                Book Another
-              </button>
             </div>
 
           ) : geoStatus === 'idle' || geoStatus === 'error' ? (
@@ -275,28 +317,8 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         </div>
       </div>
 
-      {/* Recent Trips */}
-      {state?.trips?.length > 0 && (
-        <div style={{ animation: 'float-up 0.6s ease 0.3s both' }}>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 24, padding: '20px' }}>
-            <SectionLabel>RECENT TRIPS</SectionLabel>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {state.trips.slice(0, 5).map((trip, i) => (
-                <div key={trip.id} style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--bg3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: `slide-in 0.3s ease ${i * 0.05}s both` }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{trip.pickup} → {trip.dropoff}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2, display: 'flex', gap: 8 }}>
-                      <span>{trip.student_name}</span><span>·</span>
-                      <span>{new Date(trip.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </div>
-                  <StatusBadge status={trip.status} />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Recent trips section REMOVED — admin only */}
+
     </div>
   );
 }
@@ -315,10 +337,4 @@ function SelectField({ label, value, onChange, options }) {
       </select>
     </div>
   );
-}
-
-function StatusBadge({ status }) {
-  const cfg = { confirmed: { color: 'var(--amber)', bg: 'var(--amber-dim)', label: 'Active' }, completed: { color: 'var(--green)', bg: 'var(--green-dim)', label: 'Done' }, requested: { color: 'var(--blue)', bg: 'var(--blue-dim)', label: 'Pending' } };
-  const c = cfg[status] || cfg.requested;
-  return <div style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: c.bg, color: c.color, fontFamily: 'var(--font-display)', letterSpacing: '0.5px' }}>{c.label}</div>;
 }
