@@ -38,11 +38,17 @@ function sendPushNotification(title, body) {
   if (Notification.permission === 'granted') new Notification(title, { body, icon: '/favicon.ico' });
 }
 
+// Decode student ID from JWT without verifying (server already verified it)
+function getStudentIdFromToken(token) {
+  try { return JSON.parse(atob(token.split('.')[1])).id; } catch { return null; }
+}
+
 export default function StudentApp({ state, backend, onRefetch, lastUpdate, offline, studentToken, studentName, studentEmail, onLogout }) {
   const [form, setForm] = useState({ pickup: '', dropoff: '' });
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [activeTrip, setActiveTrip] = useState(null);   // current confirmed trip for this student
+  const [bookingResult, setBookingResult] = useState(null); // confirmation data shown after booking
   const [error, setError] = useState('');
   const [prevCount, setPrevCount] = useState(null);
   const [countAnimating, setCountAnimating] = useState(false);
@@ -50,24 +56,23 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
   const [geoInfo, setGeoInfo] = useState(null);
   const [geoError, setGeoError] = useState('');
 
+  const studentId = getStudentIdFromToken(studentToken);
+
   const autosAtGate = state ? parseInt(state.autos_at_gate || '0') : null;
   const eta = state?.eta_minutes;
   const peakStatus = state?.peak_status || 'normal';
 
-  // Derive this student's active trip from global state
+  // Sync active trip from server state — match by student_id (reliable) not name (fragile)
+  // But only overwrite if we don't already have a locally-set activeTrip from a fresh booking,
+  // to avoid a race where the refetch arrives before the socket update clears it.
   useEffect(() => {
-    if (!state?.trips || !studentEmail) return;
-    const myActive = state.trips.find(
-      t => t.status === 'confirmed' && t.student_name && state.trips &&
-           // match by student_name since that's what's in the trip list
-           true
-    );
-    // We match by student_name from the JWT which is stored in studentName prop
+    if (!state?.trips || !studentId) return;
     const mine = state.trips.find(
-      t => t.status === 'confirmed' && t.student_name === studentName
+      t => t.status === 'confirmed' && t.student_id === studentId
     );
+    // If server says no active trip, clear it. If server confirms one, set it.
     setActiveTrip(mine || null);
-  }, [state, studentName]);
+  }, [state, studentId]);
 
   useEffect(() => { requestNotificationPermission(); }, []);
 
@@ -119,6 +124,19 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         setError(data.error || 'Request failed');
         if (res.status === 401 || res.status === 403) onLogout();
       } else {
+        // Immediately lock out further bookings using the response data
+        // (don't wait for the socket/refetch to update state.trips)
+        setActiveTrip({
+          id: data.tripId,
+          pickup: form.pickup,
+          dropoff: form.dropoff,
+          student_id: studentId,
+          student_name: studentName,
+          status: 'confirmed',
+          created_at: new Date().toISOString(),
+          auto_id: data.auto_id,
+        });
+        setBookingResult(data);   // show confirmation card
         setForm({ pickup: '', dropoff: '' });
         setGeoStatus('idle');
         onRefetch();
@@ -139,7 +157,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
       });
       const data = await res.json();
       if (!res.ok) setError(data.error || 'Could not cancel trip');
-      else { setActiveTrip(null); onRefetch(); }
+      else { setActiveTrip(null); setBookingResult(null); onRefetch(); }
     } catch { setError('Could not connect to server'); }
     setCancelling(false);
   };
@@ -222,6 +240,20 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
       {activeTrip && (
         <div style={{ animation: 'float-up 0.4s ease both', marginBottom: 20 }}>
           <div style={{ background: 'var(--amber-dim)', border: '1px solid rgba(245,166,35,0.35)', borderRadius: 20, padding: '20px' }}>
+            {/* Booking confirmation — shown immediately after booking */}
+            {bookingResult && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'var(--green-dim)', border: '1px solid rgba(0,229,160,0.3)', marginBottom: 14 }}>
+                <span style={{ fontSize: 20 }}>✅</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>Ride Confirmed!</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Driver: <strong style={{ color: 'var(--text)' }}>{bookingResult.driver}</strong>
+                    {bookingResult.vehicle_type === 'EV' && <span style={{ color: 'var(--green)', marginLeft: 6 }}>⚡ EV</span>}
+                    <span style={{ marginLeft: 8 }}>· Trip <strong style={{ color: 'var(--text)' }}>#{bookingResult.tripId}</strong></span>
+                  </div>
+                </div>
+              </div>
+            )}
             <SectionLabel>YOUR ACTIVE RIDE</SectionLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--text-dim)', marginBottom: 16 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
