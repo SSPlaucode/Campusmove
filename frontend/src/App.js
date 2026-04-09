@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import AuthScreen  from './AuthScreen';
-import StudentApp  from './StudentApp';
-import AdminApp    from './AdminApp';
+import StudentApp  from './components/StudentApp';
+import AdminApp    from './components/AdminApp';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 
 // ── Role detection ────────────────────────────────────────────────────────────
 // Decode JWT payload WITHOUT verifying signature (verification happens server-side).

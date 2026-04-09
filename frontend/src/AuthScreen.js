@@ -56,12 +56,6 @@ export default function AuthScreen({ backend, onAuth }) {
     setLoading(false);
   };
 
-  const switchMode = () => {
-    setMode(m => m === 'login' ? 'register' : 'login');
-    setError('');
-    setForm({ name: '', email: '', password: '', confirm: '' });
-  };
-
   return (
     <div style={{ maxWidth: 400, margin: '60px auto', padding: '0 20px' }}>
       <div style={{
