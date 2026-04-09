@@ -12,7 +12,7 @@ const STOPS = {
 const STOP_NAMES = Object.keys(STOPS);
 
 // How close (in metres) the student must be to a stop to book a ride
-const GEOFENCE_RADIUS_M = 150;
+const GEOFENCE_RADIUS_M = 15;
 
 // ── Haversine distance (metres) between two lat/lng points ───────────────────
 function haversineDistance(lat1, lng1, lat2, lng2) {
