@@ -8,7 +8,7 @@ const STOPS = {
   'Gaushala Road':     { lat: 28.48331524485649,  lng: 77.18885118170873 },
 };
 const STOP_NAMES = Object.keys(STOPS);
-const GEOFENCE_RADIUS_M = 15;
+const GEOFENCE_RADIUS_M = 50;
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000;
