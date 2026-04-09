@@ -85,6 +85,18 @@ async function initDB() {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS grievances (
+        id SERIAL PRIMARY KEY,
+        student_id INTEGER REFERENCES users(id),
+        student_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        trip_id INTEGER REFERENCES queue_entries(id) DEFAULT NULL,
+        status TEXT DEFAULT 'open',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ DEFAULT NULL,
+        admin_note TEXT DEFAULT NULL
+      );
       CREATE TABLE IF NOT EXISTS demand_log (
         id SERIAL PRIMARY KEY,
         hour_of_day INTEGER NOT NULL,
@@ -99,15 +111,28 @@ async function initDB() {
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION DEFAULT 77.1950`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS driver_pin TEXT DEFAULT NULL`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS ev_schedule_override BOOLEAN DEFAULT false`);
+    // Migrate: all autos are EVs
+    await client.query(`UPDATE autos SET vehicle_type='EV' WHERE vehicle_type='petrol'`);
+    // Reset positions to actual stop locations
+    const stopPositions = [
+      { name: 'Rajan',  lat: 28.481506, lng: 77.201566 },
+      { name: 'Suresh', lat: 28.484021, lng: 77.198373 },
+      { name: 'Mohan',  lat: 28.488978, lng: 77.193888 },
+      { name: 'Vikram', lat: 28.483315, lng: 77.188851 },
+      { name: 'Deepak', lat: 28.484021, lng: 77.198373 },
+    ];
+    for (const p of stopPositions) {
+      await client.query(`UPDATE autos SET lat=$1, lng=$2 WHERE driver_name=$3 AND status != 'on_trip'`, [p.lat, p.lng, p.name]);
+    }
 
     const { rows } = await client.query('SELECT COUNT(*) as c FROM autos');
     if (parseInt(rows[0].c) === 0) {
       const drivers = [
-        { name: 'Rajan',  type: 'petrol', lat: 28.4815, lng: 77.2016, pin: '1234' },
-        { name: 'Suresh', type: 'petrol', lat: 28.4840, lng: 77.1984, pin: '2345' },
-        { name: 'Mohan',  type: 'EV',     lat: 28.4890, lng: 77.1939, pin: '3456' },
-        { name: 'Vikram', type: 'petrol', lat: 28.4833, lng: 77.1889, pin: '4567' },
-        { name: 'Deepak', type: 'petrol', lat: 28.4820, lng: 77.1960, pin: '5678' },
+        { name: 'Rajan',  type: 'EV', lat: 28.481506, lng: 77.201566, pin: '1234' }, // Main Gate 1
+        { name: 'Suresh', type: 'EV', lat: 28.484021, lng: 77.198373, pin: '2345' }, // Main Gate 2
+        { name: 'Mohan',  type: 'EV', lat: 28.488978, lng: 77.193888, pin: '3456' }, // Rajpur Khurd Road
+        { name: 'Vikram', type: 'EV', lat: 28.483315, lng: 77.188851, pin: '4567' }, // Gaushala Road
+        { name: 'Deepak', type: 'EV', lat: 28.484021, lng: 77.198373, pin: '5678' }, // Main Gate 2
       ];
       for (const d of drivers) {
         const pinHash = await bcrypt.hash(d.pin, 10);
@@ -180,8 +205,8 @@ async function simulateAutoPositions() {
   try {
     const { rows } = await client.query("SELECT * FROM autos WHERE status = 'on_trip'");
     for (const auto of rows) {
-      const newLat = auto.lat + (Math.random() - 0.5) * 0.0006;
-      const newLng = auto.lng + (Math.random() - 0.5) * 0.0006;
+      const newLat = auto.lat + (Math.random() - 0.5) * 0.0002;
+      const newLng = auto.lng + (Math.random() - 0.5) * 0.0002;
       await client.query('UPDATE autos SET lat=$1, lng=$2 WHERE id=$3', [newLat, newLng, auto.id]);
     }
     if (rows.length > 0) broadcast();
@@ -699,6 +724,54 @@ app.get('/api/trips', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Driver — live location update ─────────────────────────────────────────────
+app.post('/api/driver/location', driverAuth, async (req, res) => {
+  const { lat, lng } = req.body;
+  if (!lat || !lng) return res.status(400).json({ error: 'lat/lng required' });
+  try {
+    await pool.query('UPDATE autos SET lat=$1, lng=$2 WHERE id=$3', [lat, lng, req.driver.id]);
+    broadcast();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Grievances ────────────────────────────────────────────────────────────────
+app.post('/api/grievance', studentAuth, async (req, res) => {
+  const { category, description, trip_id } = req.body;
+  if (!category?.trim() || !description?.trim())
+    return res.status(400).json({ error: 'Category and description are required' });
+  if (description.trim().length < 10)
+    return res.status(400).json({ error: 'Please describe the issue in at least 10 characters' });
+  try {
+    await pool.query(
+      `INSERT INTO grievances (student_id, student_name, category, description, trip_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.student.id, req.student.name, category.trim(), description.trim(), trip_id || null]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/grievances', adminAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM grievances ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/grievance/:id/resolve', adminAuth, async (req, res) => {
+  const { admin_note } = req.body;
+  try {
+    await pool.query(
+      `UPDATE grievances SET status='resolved', resolved_at=$1, admin_note=$2 WHERE id=$3`,
+      [new Date(), admin_note || '', req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 io.on('connection', async (socket) => {
   try {
@@ -712,5 +785,6 @@ initDB().then(() => {
   server.listen(PORT, () => {
     console.log(`CampusMove v4 running on :${PORT}`);
     setTimeout(runDispatchJob, 5000);
+    setTimeout(runEVScheduleJob, 3000); // set correct EV status immediately on boot
   });
 }).catch(e => { console.error('DB init failed:', e.message); process.exit(1); });

@@ -62,10 +62,11 @@ export default function MapView({ autos }) {
 
   function updateMarkers(L, map, autos) {
     autos.forEach(auto => {
-      const lat = auto.lat || 28.5244;
-      const lng = auto.lng || 77.1855;
+      const lat = auto.lat || 28.481506;
+      const lng = auto.lng || 77.201566;
       const isAvail = auto.status === 'available';
-      const color = isAvail ? '#00e5a0' : '#f5a623';
+      const isOffline = auto.status === 'offline';
+      const color = isAvail ? '#00e5a0' : isOffline ? '#555566' : '#f5a623';
 
       const icon = L.divIcon({
         html: `<div style="
@@ -74,6 +75,7 @@ export default function MapView({ autos }) {
           display: flex; align-items: center; justify-content: center;
           font-size: 18px; box-shadow: 0 0 12px ${color}55;
           transition: all 0.5s;
+          opacity: ${isOffline ? '0.4' : '1'};
         ">🛺</div>`,
         className: '',
         iconSize: [36, 36],
@@ -82,13 +84,27 @@ export default function MapView({ autos }) {
 
       if (markersRef.current[auto.id]) {
         markersRef.current[auto.id].setLatLng([lat, lng]).setIcon(icon);
+        markersRef.current[auto.id].setPopupContent(`
+          <div style="font-family:'DM Sans',sans-serif;color:#f0f0f8;background:#1a1a28;padding:8px;border-radius:8px;min-width:120px;">
+            <strong>${auto.driver_name}</strong>
+            <br/><span style="color:#aaa;font-size:11px;">${
+              auto.status === 'available' ? '✅ Available' :
+              auto.status === 'on_trip'   ? '🔸 On Trip' :
+                                           '⛔ Offline'
+            } · ${auto.location || 'gate'}</span>
+          </div>
+        `);
       } else {
         const marker = L.marker([lat, lng], { icon })
           .addTo(map)
           .bindPopup(`
             <div style="font-family:'DM Sans',sans-serif;color:#f0f0f8;background:#1a1a28;padding:8px;border-radius:8px;min-width:120px;">
               <strong>${auto.driver_name}</strong>
-              <br/><span style="color:#aaa;font-size:11px;">${isAvail ? '✅ Available' : '🔸 On Trip'} · ${auto.location}</span>
+              <br/><span style="color:#aaa;font-size:11px;">${
+                auto.status === 'available' ? '✅ Available' :
+                auto.status === 'on_trip'   ? '🔸 On Trip' :
+                                             '⛔ Offline'
+              } · ${auto.location || 'gate'}</span>
             </div>
           `);
         markersRef.current[auto.id] = marker;
@@ -109,6 +125,7 @@ export default function MapView({ autos }) {
         {[
           { color: '#00e5a0', label: 'Available' },
           { color: '#f5a623', label: 'On Trip' },
+          { color: '#555566', label: 'Offline' },
           { color: '#4d9fff', label: 'Stop' },
         ].map(l => (
           <div key={l.label} style={{

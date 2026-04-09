@@ -104,10 +104,11 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
   };
 
   const tabs = [
-    { id: 'queues',   label: '📋 Queues'   },
-    { id: 'fleet',    label: '🛺 Fleet'    },
-    { id: 'forecast', label: '📈 Forecast' },
-    { id: 'drivers',  label: '🔑 Drivers'  },
+    { id: 'queues',     label: '📋 Queues'     },
+    { id: 'fleet',      label: '🛺 Fleet'      },
+    { id: 'forecast',   label: '📈 Forecast'   },
+    { id: 'grievances', label: '⚠️ Reports'    },
+    { id: 'drivers',    label: '🔑 Drivers'    },
   ];
 
   return (
@@ -244,18 +245,6 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <SectionLabel>FLEET MANAGEMENT</SectionLabel>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Label>ETA (min)</Label>
-              <select value={state?.eta_minutes || '8'} onChange={e => handleUpdateState('eta_minutes', e.target.value)} style={{ padding: '5px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
-                {[3,5,8,10,12,15].map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-              <Label>Status</Label>
-              <select value={state?.peak_status || 'normal'} onChange={e => handleUpdateState('peak_status', e.target.value)} style={{ padding: '5px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 13 }}>
-                <option value="normal">Normal</option>
-                <option value="high">Peak</option>
-                <option value="low">Quiet</option>
-              </select>
-            </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(state?.autos || []).map(auto => (
@@ -342,6 +331,11 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
         </div>
       )}
 
+      {/* ── Grievances Tab ── */}
+      {tab === 'grievances' && (
+        <GrievancesPanel backend={backend} adminToken={adminToken} />
+      )}
+
       {/* ── Drivers / PIN Tab ── */}
       {tab === 'drivers' && (
         <DriverPINManager autos={state?.autos || []} backend={backend} adminToken={adminToken} onRefetch={onRefetch} />
@@ -411,6 +405,101 @@ function DriverPINManager({ autos, backend, adminToken, onRefetch }) {
             {msg[auto.id] && (
               <div style={{ fontSize: 12, marginTop: 6, color: msg[auto.id].startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
                 {msg[auto.id]}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Grievances Panel ──────────────────────────────────────────────────────────
+function GrievancesPanel({ backend, adminToken }) {
+  const [grievances, setGrievances] = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [notes,      setNotes]      = useState({});
+  const [resolving,  setResolving]  = useState({});
+
+  const auth = { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' };
+
+  useEffect(() => {
+    fetch(`${backend}/api/admin/grievances`, { headers: auth })
+      .then(r => r.json())
+      .then(data => { setGrievances(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleResolve = async (id) => {
+    setResolving(r => ({ ...r, [id]: true }));
+    try {
+      await fetch(`${backend}/api/admin/grievance/${id}/resolve`, {
+        method: 'POST', headers: auth,
+        body: JSON.stringify({ admin_note: notes[id] || '' }),
+      });
+      setGrievances(g => g.map(x => x.id === id ? { ...x, status: 'resolved', admin_note: notes[id] || '' } : x));
+    } catch {}
+    setResolving(r => ({ ...r, [id]: false }));
+  };
+
+  const open     = grievances.filter(g => g.status === 'open');
+  const resolved = grievances.filter(g => g.status === 'resolved');
+
+  if (loading) return <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <SectionLabel>STUDENT REPORTS</SectionLabel>
+        {open.length > 0 && (
+          <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 10,
+            background: 'var(--red-dim)', color: 'var(--red)', border: '1px solid rgba(255,77,109,0.3)',
+            fontWeight: 700 }}>{open.length} open</span>
+        )}
+      </div>
+
+      {grievances.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-faint)', fontSize: 14 }}>
+          No reports yet ✅
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[...open, ...resolved].map(g => (
+          <div key={g.id} style={{ background: 'var(--surface)', border: `1px solid ${g.status === 'open' ? 'rgba(255,77,109,0.3)' : 'var(--border)'}`, borderRadius: 16, padding: '16px 18px', opacity: g.status === 'resolved' ? 0.6 : 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div>
+                <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 8, fontWeight: 700,
+                  background: g.status === 'open' ? 'var(--red-dim)' : 'var(--green-dim)',
+                  color: g.status === 'open' ? 'var(--red)' : 'var(--green)',
+                  border: `1px solid ${g.status === 'open' ? 'rgba(255,77,109,0.3)' : 'rgba(0,229,160,0.3)'}`,
+                  marginRight: 8 }}>{g.status}</span>
+                <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 8, background: 'var(--bg3)', color: 'var(--text-dim)', border: '1px solid var(--border)' }}>{g.category}</span>
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                {new Date(g.created_at).toLocaleDateString()} {new Date(g.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>{g.student_name}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: g.status === 'open' ? 12 : 0 }}>{g.description}</div>
+            {g.admin_note && (
+              <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 6 }}>✓ Note: {g.admin_note}</div>
+            )}
+            {g.status === 'open' && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <input
+                  value={notes[g.id] || ''}
+                  onChange={e => setNotes(n => ({ ...n, [g.id]: e.target.value }))}
+                  placeholder="Add a note (optional)"
+                  style={{ flex: 1, padding: '8px 12px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-body)', outline: 'none' }}
+                />
+                <button onClick={() => handleResolve(g.id)} disabled={resolving[g.id]}
+                  style={{ padding: '8px 14px', borderRadius: 8, border: 'none',
+                    background: 'var(--green)', color: '#0a0a0f',
+                    fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 12,
+                    cursor: resolving[g.id] ? 'not-allowed' : 'pointer' }}>
+                  {resolving[g.id] ? '…' : '✓ Resolve'}
+                </button>
               </div>
             )}
           </div>

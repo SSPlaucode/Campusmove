@@ -122,7 +122,39 @@ function DriverDashboard({ state, backend, onRefetch, lastUpdate, offline, drive
     fetchDashboard();
   }, [state, driverId]);
 
-  const handleStart = async () => {
+  // Check if currently in EV operating hours (IST: 08:30–10:30, 15:30–18:00)
+  function isOperatingHour() {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    return (mins >= 8*60+30 && mins < 10*60+30) || (mins >= 15*60+30 && mins < 18*60);
+  }
+
+  function nextShiftLabel() {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    if (mins < 8*60+30)  return '8:30 AM';
+    if (mins < 15*60+30) return '3:30 PM';
+    return '8:30 AM tomorrow';
+  }
+
+  // Stream live GPS to server when on a trip
+  useEffect(() => {
+    if (!group || !navigator.geolocation) return;
+    const interval = setInterval(() => {
+      navigator.geolocation.getCurrentPosition(pos => {
+        fetch(`${backend}/api/driver/location`, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        }).catch(() => {});
+      }, () => {}, { enableHighAccuracy: true, timeout: 5000 });
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [group, backend, driverToken]);
     if (!group?.length) return;
     const groupId = group[0].group_id;
     setActionLoad(true); setError('');
@@ -158,6 +190,8 @@ function DriverDashboard({ state, backend, onRefetch, lastUpdate, offline, drive
   };
 
   const tripStatus = group?.[0]?.status;
+  const isOnline = driverInfo?.status === 'available' || driverInfo?.status === 'on_trip';
+  const operating = isOperatingHour();
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 80px' }}>
@@ -168,14 +202,14 @@ function DriverDashboard({ state, backend, onRefetch, lastUpdate, offline, drive
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, color: 'var(--text)' }}>Driver Panel</div>
           <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>
             🛺 {driverName}
-            {driverInfo?.vehicle_type === 'EV' && <span style={{ color: 'var(--green)', marginLeft: 6 }}>⚡ EV</span>}
+            <span style={{ color: 'var(--green)', marginLeft: 6 }}>⚡ EV</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%',
-            background: driverInfo?.status === 'available' ? 'var(--green)' : 'var(--amber)' }} />
+            background: driverInfo?.status === 'on_trip' ? 'var(--amber)' : driverInfo?.status === 'available' ? 'var(--green)' : 'var(--red)' }} />
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {driverInfo?.status === 'available' ? 'Available' : 'On Trip'}
+            {driverInfo?.status === 'on_trip' ? 'On Trip' : driverInfo?.status === 'available' ? 'Available' : 'Offline'}
           </span>
           <button onClick={onLogout} style={btnSmall}>Sign Out</button>
         </div>
@@ -189,8 +223,30 @@ function DriverDashboard({ state, backend, onRefetch, lastUpdate, offline, drive
 
       {error && <div style={{ ...errBox, marginBottom: 16 }}>{error}</div>}
 
-      {/* No active group */}
-      {!group ? (
+      {/* Offline hours screen */}
+      {driverInfo?.status === 'offline' && !group ? (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 24, padding: '48px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🌙</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text)', marginBottom: 8 }}>
+            Off Duty
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: 20 }}>
+            Your vehicle is outside operating hours.<br />
+            <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>Shifts: 8:30–10:30 AM · 3:30–6:00 PM</span>
+          </div>
+          <div style={{ display: 'inline-block', padding: '8px 18px', borderRadius: 20,
+            background: 'var(--amber-dim)', border: '1px solid rgba(245,166,35,0.3)',
+            fontSize: 13, color: 'var(--amber)', marginBottom: 20 }}>
+            ⏰ Next shift starts at <strong>{nextShiftLabel()}</strong>
+          </div>
+          <div>
+            <button onClick={fetchDashboard} style={{ padding: '10px 20px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg3)', color: 'var(--text-dim)', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+              🔄  Refresh
+            </button>
+          </div>
+        </div>
+
+      ) : !group ? (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 24, padding: '48px 24px', textAlign: 'center' }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text)', marginBottom: 8 }}>
@@ -266,7 +322,7 @@ function DriverDashboard({ state, backend, onRefetch, lastUpdate, offline, drive
                     color: actionLoad ? 'var(--text-faint)' : 'var(--green)',
                     fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15,
                     cursor: actionLoad ? 'not-allowed' : 'pointer',
-                    border: '2px solid var(--green)',
+                    outline: '2px solid var(--green)',
                     boxShadow: actionLoad ? 'none' : '0 4px 20px rgba(0,229,160,0.2)' }}>
                   {actionLoad ? 'Completing…' : '🏁  Trip Complete — Drop Off Done'}
                 </button>
