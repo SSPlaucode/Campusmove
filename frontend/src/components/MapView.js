@@ -2,14 +2,10 @@ import React, { useEffect, useRef } from 'react';
 
 // SAU campus stop coordinates
 const STOPS = {
-  'Main Gate':      { lat: 28.5235, lng: 77.1848 },
-  'Academic Block': { lat: 28.5248, lng: 77.1860 },
-  'Hostel A':       { lat: 28.5255, lng: 77.1870 },
-  'Hostel B':       { lat: 28.5258, lng: 77.1865 },
-  'Library':        { lat: 28.5244, lng: 77.1855 },
-  'Canteen':        { lat: 28.5241, lng: 77.1858 },
-  'Sports Ground':  { lat: 28.5260, lng: 77.1845 },
-  'Admin Block':    { lat: 28.5238, lng: 77.1852 },
+  'Main Gate 1':    { lat: 28.481506696970786, lng: 77.20156655401924 },
+  'Main Gate 2':    { lat: 28.484021948032776, lng: 77.1983732789934 },
+  'Rajpur Khurd Road': { lat: 28.488978658164335, lng: 77.19388845282725 },
+  'Gaushala Road':  { lat: 28.48331524485649, lng: 77.18885118170873 },
 };
 
 export default function MapView({ autos }) {

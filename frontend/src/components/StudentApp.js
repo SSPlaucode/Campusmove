@@ -69,7 +69,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
     setSubmitting(false);
   };
 
-  const STOPS = ['Main Gate', 'Academic Block', 'Hostel A', 'Hostel B', 'Library', 'Canteen', 'Sports Ground', 'Admin Block'];
+  const STOPS = ['Main Gate 1', 'Main Gate 2', 'Rajpur Khurd Road', 'Gaushala Road'];
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 80px' }}>
