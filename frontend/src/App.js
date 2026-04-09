@@ -3,20 +3,16 @@ import { io } from 'socket.io-client';
 import AuthScreen  from './AuthScreen';
 import StudentApp  from './components/StudentApp';
 import AdminApp    from './components/AdminApp';
+import DriverApp   from './components/DriverApp';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 
-// ── Role detection ────────────────────────────────────────────────────────────
-// Decode JWT payload WITHOUT verifying signature (verification happens server-side).
 function decodeJWT(token) {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]));
-    // Check expiry
     if (payload.exp && payload.exp * 1000 < Date.now()) return null;
     return payload;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export default function App() {
@@ -28,21 +24,30 @@ export default function App() {
   const [studentName,  setStudentName]  = useState(() => localStorage.getItem('cm_student_name')  || '');
   const [studentEmail, setStudentEmail] = useState(() => localStorage.getItem('cm_student_email') || '');
 
-  const [adminToken, setAdminToken] = useState(null);
+  const [adminToken,  setAdminToken]  = useState(null);
 
-  // Which view is the user in: 'student' | 'admin_login' | 'admin'
-  // Students land on 'student' automatically after auth.
-  // Admins must go to /admin (or tap a hidden link) to get the admin login screen.
+  const [driverToken,  setDriverToken]  = useState(() => {
+    const t = localStorage.getItem('cm_driver_token');
+    return t && decodeJWT(t) ? t : null;
+  });
+  const [driverName,   setDriverName]   = useState(() => localStorage.getItem('cm_driver_name')  || '');
+  const [driverId,     setDriverId]     = useState(() => localStorage.getItem('cm_driver_id')    || null);
+
+  // ── View routing ────────────────────────────────────────────────────────────
   const [view, setView] = useState(() => {
-    // If URL has #admin, show admin login
-    if (window.location.hash === '#admin') return 'admin_login';
+    const hash = window.location.hash;
+    if (hash === '#admin')  return 'admin_login';
+    if (hash === '#driver') {
+      const t = localStorage.getItem('cm_driver_token');
+      return t && decodeJWT(t) ? 'driver' : 'driver_login';
+    }
     return studentToken ? 'student' : 'auth';
   });
 
   // ── App data ────────────────────────────────────────────────────────────────
-  const [state, setState] = useState(null);
+  const [state,      setState]      = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [offline, setOffline] = useState(false);
+  const [offline,    setOffline]    = useState(false);
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -51,7 +56,7 @@ export default function App() {
     socketRef.current = socket;
     socket.on('init',         ({ data }) => { setState(data); setLastUpdate(new Date()); setOffline(false); });
     socket.on('state_update', ({ data }) => { setState(data); setLastUpdate(new Date()); setOffline(false); });
-    socket.on('disconnect', () => setOffline(true));
+    socket.on('disconnect',   ()         => setOffline(true));
     return () => socket.disconnect();
   }, []);
 
@@ -62,11 +67,12 @@ export default function App() {
     } catch { setOffline(true); }
   }
 
-  // ── Auth handlers ───────────────────────────────────────────────────────────
+  // ── Student auth ────────────────────────────────────────────────────────────
   function handleStudentAuth(token, name, email) {
-    setStudentToken(token);
-    setStudentName(name);
-    setStudentEmail(email);
+    localStorage.setItem('cm_student_token', token);
+    localStorage.setItem('cm_student_name',  name);
+    localStorage.setItem('cm_student_email', email);
+    setStudentToken(token); setStudentName(name); setStudentEmail(email);
     setView('student');
   }
 
@@ -74,89 +80,85 @@ export default function App() {
     localStorage.removeItem('cm_student_token');
     localStorage.removeItem('cm_student_name');
     localStorage.removeItem('cm_student_email');
-    setStudentToken(null);
-    setStudentName('');
-    setStudentEmail('');
+    setStudentToken(null); setStudentName(''); setStudentEmail('');
     setView('auth');
   }
 
-  function handleAdminLogin(token) {
-    setAdminToken(token);
-    setView('admin');
+  // ── Admin auth ──────────────────────────────────────────────────────────────
+  function handleAdminLogin(token) { setAdminToken(token); setView('admin'); }
+  function handleAdminLogout() { setAdminToken(null); setView('admin_login'); window.location.hash = '#admin'; }
+
+  // ── Driver auth ─────────────────────────────────────────────────────────────
+  function handleDriverLogin(token, name, id) {
+    localStorage.setItem('cm_driver_token', token);
+    localStorage.setItem('cm_driver_name',  name);
+    localStorage.setItem('cm_driver_id',    id);
+    setDriverToken(token); setDriverName(name); setDriverId(id);
+    setView('driver');
   }
 
-  function handleAdminLogout() {
-    setAdminToken(null);
-    setView('admin_login');
-    // Clear hash so a page refresh doesn't bounce back to admin
-    window.location.hash = '#admin';
+  function handleDriverLogout() {
+    localStorage.removeItem('cm_driver_token');
+    localStorage.removeItem('cm_driver_name');
+    localStorage.removeItem('cm_driver_id');
+    setDriverToken(null); setDriverName(''); setDriverId(null);
+    setView('driver_login');
+    window.location.hash = '#driver';
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
-
-  // Student auth screen
   if (view === 'auth') {
     return (
       <AppShell>
         <AuthScreen backend={BACKEND} onAuth={handleStudentAuth} />
-        {/* Hidden admin entry — plain text link, no obvious button */}
-        <div style={{ position: 'fixed', bottom: 12, right: 16 }}>
-          <span
-            onClick={() => setView('admin_login')}
-            style={{ fontSize: 10, color: 'var(--text-faint)', cursor: 'pointer', opacity: 0.4, userSelect: 'none' }}
-          >
+        <div style={{ position: 'fixed', bottom: 12, right: 16, display: 'flex', gap: 16 }}>
+          <span onClick={() => setView('admin_login')}
+            style={{ fontSize: 10, color: 'var(--text-faint)', cursor: 'pointer', opacity: 0.4, userSelect: 'none' }}>
             admin
+          </span>
+          <span onClick={() => setView('driver_login')}
+            style={{ fontSize: 10, color: 'var(--text-faint)', cursor: 'pointer', opacity: 0.4, userSelect: 'none' }}>
+            driver
           </span>
         </div>
       </AppShell>
     );
   }
 
-  // Student app — only rendered when student is logged in
   if (view === 'student') {
     return (
       <AppShell>
         <StudentApp
-          state={state}
-          backend={BACKEND}
-          onRefetch={fetchState}
-          lastUpdate={lastUpdate}
-          offline={offline}
-          studentToken={studentToken}
-          studentName={studentName}
+          state={state} backend={BACKEND} onRefetch={fetchState}
+          lastUpdate={lastUpdate} offline={offline}
+          studentToken={studentToken} studentName={studentName} studentEmail={studentEmail}
           onLogout={handleStudentLogout}
         />
       </AppShell>
     );
   }
 
-  // Admin login screen — completely separate, no student UI
-  if (view === 'admin_login') {
+  if (view === 'admin_login' || view === 'admin') {
     return (
       <AppShell>
         <AdminApp
-          state={state}
-          backend={BACKEND}
-          onRefetch={fetchState}
-          adminToken={null}
-          onLogin={handleAdminLogin}
-          onLogout={handleAdminLogout}
+          state={state} backend={BACKEND} onRefetch={fetchState}
+          adminToken={view === 'admin' ? adminToken : null}
+          onLogin={handleAdminLogin} onLogout={handleAdminLogout}
         />
       </AppShell>
     );
   }
 
-  // Admin dashboard — only rendered when admin is logged in
-  if (view === 'admin') {
+  if (view === 'driver_login' || view === 'driver') {
     return (
       <AppShell>
-        <AdminApp
-          state={state}
-          backend={BACKEND}
-          onRefetch={fetchState}
-          adminToken={adminToken}
-          onLogin={handleAdminLogin}
-          onLogout={handleAdminLogout}
+        <DriverApp
+          state={state} backend={BACKEND} onRefetch={fetchState}
+          lastUpdate={lastUpdate} offline={offline}
+          driverToken={view === 'driver' ? driverToken : null}
+          driverName={driverName} driverId={driverId}
+          onLogin={handleDriverLogin} onLogout={handleDriverLogout}
         />
       </AppShell>
     );
@@ -165,7 +167,6 @@ export default function App() {
   return null;
 }
 
-// Minimal wrapper — keeps global styles in one place
 function AppShell({ children }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}>
