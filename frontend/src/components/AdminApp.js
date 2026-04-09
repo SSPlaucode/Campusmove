@@ -269,6 +269,11 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
                     {auto.status} · {auto.location || 'gate'}
+                    {auto.vehicle_type === 'EV' && (
+                      <span style={{ marginLeft: 6, color: 'rgba(0,229,160,0.5)' }}>
+                        · schedule: 8:30–10:30, 15:30–18:00
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button onClick={() => handleToggleAuto(auto)}

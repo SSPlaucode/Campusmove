@@ -98,6 +98,7 @@ async function initDB() {
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION DEFAULT 28.4836`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION DEFAULT 77.1950`);
     await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS driver_pin TEXT DEFAULT NULL`);
+    await client.query(`ALTER TABLE autos ADD COLUMN IF NOT EXISTS ev_schedule_override BOOLEAN DEFAULT false`);
 
     const { rows } = await client.query('SELECT COUNT(*) as c FROM autos');
     if (parseInt(rows[0].c) === 0) {
@@ -189,6 +190,59 @@ async function simulateAutoPositions() {
   }
 }
 setInterval(simulateAutoPositions, 8000);
+
+// ── EV Schedule Job ───────────────────────────────────────────────────────────
+// EV autos run: 08:30–10:30 and 15:30–18:00 (IST)
+// ev_schedule_override = true means admin has manually toggled → skip auto logic
+function isEVOperatingHour() {
+  const now = new Date();
+  // Convert to IST (UTC+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
+  const h = ist.getHours(), m = ist.getMinutes();
+  const mins = h * 60 + m;
+  return (mins >= 8*60+30 && mins < 10*60+30) || (mins >= 15*60+30 && mins < 18*60);
+}
+
+async function runEVScheduleJob() {
+  const client = await pool.connect();
+  try {
+    const shouldBeAvailable = isEVOperatingHour();
+    // Only touch EV autos that are NOT overridden by admin and NOT currently on a trip
+    const { rows: evAutos } = await client.query(
+      `SELECT * FROM autos WHERE vehicle_type='EV' AND ev_schedule_override=false AND status != 'on_trip'`
+    );
+    let changed = false;
+    for (const auto of evAutos) {
+      if (shouldBeAvailable && auto.status === 'offline') {
+        await client.query(`UPDATE autos SET status='available' WHERE id=$1`, [auto.id]);
+        console.log(`EV schedule: ${auto.driver_name} → available`);
+        changed = true;
+      } else if (!shouldBeAvailable && auto.status === 'available') {
+        await client.query(`UPDATE autos SET status='offline' WHERE id=$1`, [auto.id]);
+        console.log(`EV schedule: ${auto.driver_name} → offline`);
+        changed = true;
+      }
+    }
+    if (changed) broadcast();
+  } catch (e) {
+    console.error('EV schedule error:', e.message);
+  } finally {
+    client.release();
+  }
+}
+setInterval(runEVScheduleJob, 60000); // check every minute
+
+// ── Auto Peak Status ──────────────────────────────────────────────────────────
+// Derives peak_status from forecast so admin doesn't need to set it manually
+function getAutoPeakStatus() {
+  const now = new Date();
+  const hour = now.getHours();
+  const demand = DEMAND_PATTERN[hour] || 0;
+  if (demand >= 10) return 'high';
+  if (demand >= 5)  return 'normal';
+  return 'low';
+}
 
 // ── Dispatch Job ──────────────────────────────────────────────────────────────
 async function runDispatchJob() {
@@ -291,6 +345,8 @@ async function getState() {
     state.available_autos = parseInt(availRows[0].c);
     state.forecast = getDemandForecast();
     state.trips = trips.rows;
+    // Always derive peak_status from forecast — admin setting ignored
+    state.peak_status = getAutoPeakStatus();
     return state;
   } finally {
     client.release();
@@ -594,7 +650,7 @@ app.post('/api/admin/auto/:id', adminAuth, async (req, res) => {
       if (active.length > 0)
         return res.status(409).json({ error: 'Cannot free this auto — it has an active trip' });
     }
-    await client.query('UPDATE autos SET status=$1, location=$2 WHERE id=$3',
+    await client.query('UPDATE autos SET status=$1, location=$2, ev_schedule_override=CASE WHEN vehicle_type=\'EV\' THEN true ELSE ev_schedule_override END WHERE id=$3',
       [req.body.status, req.body.location || 'gate', req.params.id]);
     broadcast();
     res.json({ ok: true });
