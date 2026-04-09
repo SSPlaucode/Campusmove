@@ -26,7 +26,7 @@ export default function MapView({ autos }) {
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     script.onload = () => {
       const L = window.L;
-      const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView([28.5244, 77.1855], 17);
+      const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView([28.4840, 77.1950], 15);
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
