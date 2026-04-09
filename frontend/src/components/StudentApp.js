@@ -1,6 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MapView from './MapView';
 
+// ── Campus stop coordinates (must match MapView.js) ──────────────────────────
+const STOPS = {
+  'Main Gate 1':       { lat: 28.481506696970786, lng: 77.20156655401924 },
+  'Main Gate 2':       { lat: 28.484021948032776, lng: 77.1983732789934  },
+  'Rajpur Khurd Road': { lat: 28.488978658164335, lng: 77.19388845282725 },
+  'Gaushala Road':     { lat: 28.48331524485649,  lng: 77.18885118170873 },
+};
+
+const STOP_NAMES = Object.keys(STOPS);
+
+// How close (in metres) the student must be to a stop to book a ride
+const GEOFENCE_RADIUS_M = 150;
+
+// ── Haversine distance (metres) between two lat/lng points ───────────────────
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // Earth radius in metres
+  const toRad = deg => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Returns { nearest: stopName, distance: metres, withinFence: bool }
+function getNearestStop(userLat, userLng) {
+  let nearest = null;
+  let minDist = Infinity;
+  for (const [name, pos] of Object.entries(STOPS)) {
+    const d = haversineDistance(userLat, userLng, pos.lat, pos.lng);
+    if (d < minDist) { minDist = d; nearest = name; }
+  }
+  return { nearest, distance: Math.round(minDist), withinFence: minDist <= GEOFENCE_RADIUS_M };
+}
+
 // ── Push notification helper ──────────────────────────────────────────────────
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return false;
@@ -15,6 +51,13 @@ function sendPushNotification(title, body) {
   }
 }
 
+// ── Geofence status values ────────────────────────────────────────────────────
+// 'idle'       → not yet checked
+// 'checking'   → waiting for GPS
+// 'allowed'    → within radius of a stop
+// 'denied'     → too far from all stops
+// 'error'      → geolocation unavailable or permission denied
+
 export default function StudentApp({ state, backend, onRefetch, lastUpdate, offline }) {
   const [form, setForm] = useState({ student_name: '', pickup: '', dropoff: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -22,6 +65,11 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
   const [error, setError] = useState('');
   const [prevCount, setPrevCount] = useState(null);
   const [countAnimating, setCountAnimating] = useState(false);
+
+  // Geofencing state
+  const [geoStatus, setGeoStatus] = useState('idle');   // see values above
+  const [geoInfo, setGeoInfo] = useState(null);          // { nearest, distance, withinFence }
+  const [geoError, setGeoError] = useState('');
 
   const autosAtGate = state ? parseInt(state.autos_at_gate || '0') : null;
   const eta = state ? state.eta_minutes : null;
@@ -36,6 +84,36 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
     }
     setPrevCount(autosAtGate);
   }, [autosAtGate]);
+
+  // ── Geofence check ───────────────────────────────────────────────────────────
+  const checkGeofence = () => {
+    if (!navigator.geolocation) {
+      setGeoStatus('error');
+      setGeoError('GPS not available on this device.');
+      return;
+    }
+    setGeoStatus('checking');
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const info = getNearestStop(pos.coords.latitude, pos.coords.longitude);
+        setGeoInfo(info);
+        setGeoStatus(info.withinFence ? 'allowed' : 'denied');
+        // Auto-fill pickup with the nearest stop when allowed
+        if (info.withinFence) {
+          setForm(f => ({ ...f, pickup: info.nearest }));
+        }
+      },
+      err => {
+        setGeoStatus('error');
+        setGeoError(
+          err.code === 1
+            ? 'Location access denied. Please allow location permission and try again.'
+            : 'Could not get your location. Please try again.'
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   const peakColors = {
     normal: { color: 'var(--green)', bg: 'var(--green-dim)', label: 'Normal',     border: 'rgba(0,229,160,0.25)' },
@@ -59,6 +137,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
       else {
         setTripResult(data);
         setForm({ student_name: '', pickup: '', dropoff: '' });
+        setGeoStatus('idle'); // reset geofence so next booking re-checks
         onRefetch();
         sendPushNotification(
           '🛺 Ride Confirmed!',
@@ -69,7 +148,8 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
     setSubmitting(false);
   };
 
-  const STOPS = ['Main Gate 1', 'Main Gate 2', 'Rajpur Khurd Road', 'Gaushala Road'];
+  // Whether the booking form should be accessible
+  const bookingAllowed = geoStatus === 'allowed';
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 80px' }}>
@@ -162,7 +242,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
                   background: auto.status === 'available' ? 'var(--green-dim)' : 'rgba(255,255,255,0.05)',
                   border: `1px solid ${auto.status === 'available' ? 'rgba(0,229,160,0.25)' : 'var(--border)'}`,
                   color: auto.status === 'available' ? 'var(--green)' : 'var(--text-faint)',
-                  display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.4s',
+                  display: 'flex', alignItems: 'center', gap: 5,
                 }}>
                   <span>{auto.status === 'available' ? '●' : '○'}</span>
                   {auto.driver_name}
@@ -181,6 +261,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
           <SectionLabel>REQUEST A RIDE</SectionLabel>
 
           {tripResult ? (
+            /* ── Booking confirmed ── */
             <div style={{
               padding: '20px', borderRadius: 14,
               background: 'var(--green-dim)', border: '1px solid rgba(0,229,160,0.3)',
@@ -205,11 +286,131 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
                 fontFamily: 'var(--font-display)',
               }}>Book Another</button>
             </div>
+
+          ) : geoStatus === 'idle' || geoStatus === 'error' ? (
+            /* ── Step 1: prompt location check ── */
+            <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>📍</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                Confirm your location first
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, lineHeight: 1.6 }}>
+                Rides can only be booked from a campus pickup stop.
+                Tap below to verify you're nearby.
+              </div>
+              {geoStatus === 'error' && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 10, marginBottom: 16,
+                  background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.3)',
+                  fontSize: 13, color: 'var(--red)', textAlign: 'left',
+                }}>
+                  ⚠️ {geoError}
+                </div>
+              )}
+              <button onClick={checkGeofence} style={{
+                width: '100%', padding: '13px', borderRadius: 12, border: 'none',
+                background: 'var(--blue)', color: '#fff',
+                fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14,
+                cursor: 'pointer', letterSpacing: '0.3px',
+                boxShadow: '0 4px 20px rgba(77,159,255,0.3)',
+              }}>
+                📡  Check My Location
+              </button>
+            </div>
+
+          ) : geoStatus === 'checking' ? (
+            /* ── Step 1b: spinner while GPS resolves ── */
+            <div style={{ textAlign: 'center', padding: '24px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 12, animation: 'pulse-ring 1s ease infinite' }}>🛰️</div>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Getting your location…</div>
+            </div>
+
+          ) : geoStatus === 'denied' ? (
+            /* ── Outside all stops ── */
+            <div style={{
+              padding: '20px', borderRadius: 14,
+              background: 'rgba(255,77,109,0.08)', border: '1px solid rgba(255,77,109,0.25)',
+              animation: 'float-up 0.4s ease both',
+            }}>
+              <div style={{ fontSize: 28, marginBottom: 10 }}>🚫</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, color: 'var(--red)', marginBottom: 8 }}>
+                You're not at a pickup stop
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 14 }}>
+                You are <strong style={{ color: 'var(--text)' }}>{geoInfo?.distance}m</strong> from the nearest stop.
+                Please walk to <strong style={{ color: 'var(--text)' }}>{geoInfo?.nearest}</strong> to book a ride.
+              </div>
+              {/* Mini stop list with distances */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+                {Object.entries(STOPS).map(([name]) => {
+                  // Re-use geoInfo only for nearest; for others we can't recalculate without storing
+                  const isNearest = name === geoInfo?.nearest;
+                  return (
+                    <div key={name} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '8px 12px', borderRadius: 8,
+                      background: isNearest ? 'rgba(77,159,255,0.1)' : 'var(--bg3)',
+                      border: `1px solid ${isNearest ? 'rgba(77,159,255,0.3)' : 'var(--border)'}`,
+                    }}>
+                      <span style={{ fontSize: 12, color: isNearest ? 'var(--blue)' : 'var(--text-dim)', fontWeight: isNearest ? 600 : 400 }}>
+                        {isNearest ? '📍 ' : '🔵 '}{name}
+                      </span>
+                      {isNearest && (
+                        <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 600 }}>{geoInfo.distance}m away</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={checkGeofence} style={{
+                width: '100%', padding: '11px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)',
+                background: 'var(--bg3)', color: 'var(--text-dim)',
+                fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13,
+                cursor: 'pointer',
+              }}>
+                🔄  Re-check Location
+              </button>
+            </div>
+
           ) : (
+            /* ── Booking form (geoStatus === 'allowed') ── */
             <>
-              <InputField label="Your Name" placeholder="e.g. Shubham" value={form.student_name} onChange={v => setForm(f => ({ ...f, student_name: v }))} />
-              <SelectField label="Pickup Point" value={form.pickup} onChange={v => setForm(f => ({ ...f, pickup: v }))} options={STOPS} />
-              <SelectField label="Drop-off Point" value={form.dropoff} onChange={v => setForm(f => ({ ...f, dropoff: v }))} options={STOPS} />
+              {/* Location badge */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 12px', borderRadius: 10, marginBottom: 16,
+                background: 'var(--green-dim)', border: '1px solid rgba(0,229,160,0.25)',
+                fontSize: 12, color: 'var(--green)',
+              }}>
+                <span>✅</span>
+                <span>
+                  At <strong>{geoInfo?.nearest}</strong>
+                  <span style={{ color: 'rgba(0,229,160,0.6)', marginLeft: 4 }}>· {geoInfo?.distance}m away</span>
+                </span>
+                <button onClick={() => setGeoStatus('idle')} style={{
+                  marginLeft: 'auto', background: 'none', border: 'none',
+                  color: 'rgba(0,229,160,0.5)', cursor: 'pointer', fontSize: 11, padding: 0,
+                }}>change</button>
+              </div>
+
+              <InputField
+                label="Your Name"
+                placeholder="e.g. Shubham"
+                value={form.student_name}
+                onChange={v => setForm(f => ({ ...f, student_name: v }))}
+              />
+              <SelectField
+                label="Pickup Point"
+                value={form.pickup}
+                onChange={v => setForm(f => ({ ...f, pickup: v }))}
+                options={STOP_NAMES}
+              />
+              <SelectField
+                label="Drop-off Point"
+                value={form.dropoff}
+                onChange={v => setForm(f => ({ ...f, dropoff: v }))}
+                options={STOP_NAMES}
+              />
 
               {error && (
                 <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 14, background: 'var(--red-dim)', border: '1px solid rgba(255,77,109,0.3)', fontSize: 13, color: 'var(--red)' }}>
@@ -266,6 +467,8 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
     </div>
   );
 }
+
+// ── Helper components (unchanged) ────────────────────────────────────────────
 
 function SectionLabel({ children }) {
   return (
