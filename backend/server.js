@@ -213,8 +213,11 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: 'All fields are required' });
 
   // Enforce SAU email domain
-  if (!email.toLowerCase().endsWith('@sau.int') && !email.toLowerCase().endsWith('@student.sau.int'))
-    return res.status(400).json({ error: 'Please use your SAU email address (@sau.int)' });
+  const emailLower = email.toLowerCase();
+  const validDomain = emailLower.endsWith('@sau.int') || emailLower.endsWith('@student.sau.int')
+    || emailLower.endsWith('@students.sau.ac.in') || emailLower.endsWith('@sau.ac.in');
+  if (!validDomain)
+    return res.status(400).json({ error: 'Please use your SAU email address (@students.sau.ac.in or @sau.ac.in)' });
 
   if (password.length < 6)
     return res.status(400).json({ error: 'Password must be at least 6 characters' });
