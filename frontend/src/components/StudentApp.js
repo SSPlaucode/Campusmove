@@ -495,8 +495,6 @@ function ActiveEntryCard({ entry, onCancel, cancelling, state }) {
 }
 
 // ── Shared style helpers ──────────────────────────────────────────────────────
-const AVG_TRIP_MIN = 8;
-
 function btnPrimary(color, shadow, disabled = false) {
   return {
     width: '100%', padding: '14px', borderRadius: 12, border: 'none',
