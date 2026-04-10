@@ -230,7 +230,7 @@ function isEVOperatingHour() {
   const now = new Date();
   const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const mins = ist.getHours() * 60 + ist.getMinutes();
-  return (mins >= 9*60+30 && mins < 18*60);
+  return (mins >= 8*60+30 && mins < 18*60);
 }
 
 async function runEVScheduleJob() {
