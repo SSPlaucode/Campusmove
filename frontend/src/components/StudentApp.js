@@ -149,7 +149,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         setForm({ pickup: '', dropoff: '' });
         setGeoStatus('idle');
         onRefetch();
-        sendPush('🛺 Joined Queue!');
+        sendPush('🛺 Joined Queue!', `You're #${data.position} for ${form.pickup} → ${form.dropoff}`);
       }
     } catch { setError('Could not connect to server'); }
     setSubmitting(false);
