@@ -40,24 +40,23 @@ function getNearestStop(userLat, userLng) {
 }
 
 // ── Operating hours helpers ───────────────────────────────────────────────────
-function isOperatingHour() {
+function getISTMinutes() {
   const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
-  const mins = ist.getHours() * 60 + ist.getMinutes();
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  return ist.getHours() * 60 + ist.getMinutes();
+}
+
+function isOperatingHour() {
+  const mins = getISTMinutes();
   return (mins >= 8*60+30 && mins < 10*60+30) || (mins >= 15*60+30 && mins < 18*60);
 }
 
 function nextShiftLabel() {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
-  const mins = ist.getHours() * 60 + ist.getMinutes();
+  const mins = getISTMinutes();
   if (mins < 8*60+30)  return '8:30 AM';
   if (mins < 15*60+30) return '3:30 PM';
   return '8:30 AM tomorrow';
 }
-
 
 function sendPush(title, body) {
   if (Notification.permission === 'granted') new Notification(title, { body, icon: '/favicon.ico' });
