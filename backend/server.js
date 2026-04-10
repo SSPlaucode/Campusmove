@@ -228,12 +228,9 @@ setInterval(simulateAutoPositions, 8000);
 // ev_schedule_override = true means admin has manually toggled → skip auto logic
 function isEVOperatingHour() {
   const now = new Date();
-  // Convert to IST (UTC+5:30)
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const ist = new Date(now.getTime() + istOffset - (now.getTimezoneOffset() * 60000));
-  const h = ist.getHours(), m = ist.getMinutes();
-  const mins = h * 60 + m;
-  return (mins >= 8*60+30 && mins < 10*60+30) || (mins >= 15*60+30 && mins < 18*60);
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const mins = ist.getHours() * 60 + ist.getMinutes();
+  return (mins >= 9*60+30 && mins < 18*60);
 }
 
 async function runEVScheduleJob() {

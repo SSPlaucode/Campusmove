@@ -48,14 +48,13 @@ function getISTMinutes() {
 
 function isOperatingHour() {
   const mins = getISTMinutes();
-  return (mins >= 8*60+30 && mins < 10*60+30) || (mins >= 15*60+30 && mins < 18*60);
+  return (mins >= 9*60+30 && mins < 18*60);
 }
 
 function nextShiftLabel() {
   const mins = getISTMinutes();
-  if (mins < 8*60+30)  return '8:30 AM';
-  if (mins < 15*60+30) return '3:30 PM';
-  return '8:30 AM tomorrow';
+  if (mins < 9*60+30) return '9:30 AM';
+  return '9:30 AM tomorrow';
 }
 
 function sendPush(title, body) {
@@ -291,7 +290,7 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: 16 }}>
                   Campus autos operate during:<br />
-                  <strong style={{ color: 'var(--text)' }}>8:30 – 10:30 AM</strong> &nbsp;·&nbsp; <strong style={{ color: 'var(--text)' }}>3:30 – 6:00 PM</strong>
+                  <strong style={{ color: 'var(--text)' }}>9:30 AM – 6:00 PM</strong>
                 </div>
                 <div style={{ display: 'inline-block', padding: '8px 18px', borderRadius: 20,
                   background: 'var(--amber-dim)', border: '1px solid rgba(245,166,35,0.3)',
