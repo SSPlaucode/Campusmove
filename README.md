@@ -58,7 +58,7 @@ npm install
 node server.js
 ```
 
-Runs at: `http://localhost:3001`
+Runs at: `https://campusmove.onrender.com`
 
 **3. Frontend**
 ```bash

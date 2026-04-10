@@ -5,7 +5,7 @@ import StudentApp  from './components/StudentApp';
 import AdminApp    from './components/AdminApp';
 import DriverApp   from './components/DriverApp';
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+const BACKEND = process.env.REACT_APP_BACKEND_URL || 'https://campusmove.onrender.com';
 
 function decodeJWT(token) {
   try {
