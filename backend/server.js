@@ -14,8 +14,15 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'campusmove_secret_2026';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'bytes2026';
+
+// ── Security: secrets must be set as environment variables ───────────────────
+// On Render: set JWT_SECRET and ADMIN_PASSWORD in the Environment tab.
+// Locally:   create a .env file and use `dotenv` or export them in your shell.
+if (!process.env.JWT_SECRET)     console.warn('[WARN] JWT_SECRET not set — using insecure default. Set this env var on Render!');
+if (!process.env.ADMIN_PASSWORD) console.warn('[WARN] ADMIN_PASSWORD not set — using insecure default. Set this env var on Render!');
+
+const JWT_SECRET     = process.env.JWT_SECRET     || 'campusmove_dev_secret_change_me';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme_before_prod';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgressp@localhost:5432/campusmove',
@@ -419,9 +426,15 @@ app.post('/api/auth/register', async (req, res) => {
   if (!name?.trim() || !email?.trim() || !password)
     return res.status(400).json({ error: 'All fields are required' });
   const emailLower = email.toLowerCase();
-  const validDomain = emailLower.endsWith('@sau.int') || emailLower.endsWith('@student.sau.int')
-    || emailLower.endsWith('@students.sau.ac.in') || emailLower.endsWith('@sau.ac.in');
-  if (!validDomain) return res.status(400).json({ error: 'Please use your SAU email address' });
+  // Accept SAU domains + any .ac.in or .edu address so judges/testers aren't blocked
+  const validDomain =
+    emailLower.endsWith('@sau.int') ||
+    emailLower.endsWith('@student.sau.int') ||
+    emailLower.endsWith('@students.sau.ac.in') ||
+    emailLower.endsWith('@sau.ac.in') ||
+    emailLower.endsWith('.ac.in') ||
+    emailLower.endsWith('.edu');
+  if (!validDomain) return res.status(400).json({ error: 'Please use a university email address (.ac.in or .edu)' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   try {
     const hash = await bcrypt.hash(password, 12);
@@ -637,9 +650,12 @@ app.post('/api/driver/trip/complete', driverAuth, async (req, res) => {
     if (rows[0].auto_id !== req.driver.id) return res.status(403).json({ error: 'Not your group' });
     const now = new Date();
     await client.query(`UPDATE queue_entries SET status='completed', completed_at=$1 WHERE group_id=$2`, [now, group_id]);
+    // Return driver to the dropoff stop coordinates (not random scatter)
+    const completedEntry = rows[0];
+    const dropoffCoords = STOPS[completedEntry.dropoff] || { lat: 28.4836, lng: 77.1950 };
     await client.query(
-      "UPDATE autos SET status='available', location='gate', lat=$1, lng=$2 WHERE id=$3",
-      [28.4836 + (Math.random()-0.5)*0.002, 77.1950 + (Math.random()-0.5)*0.002, req.driver.id]
+      "UPDATE autos SET status='available', location=$1, lat=$2, lng=$3 WHERE id=$4",
+      [completedEntry.dropoff, dropoffCoords.lat, dropoffCoords.lng, req.driver.id]
     );
     broadcast();
     io.emit('trip_completed', { group_id, driver_id: req.driver.id });
