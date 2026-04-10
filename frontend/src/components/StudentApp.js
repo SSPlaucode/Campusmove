@@ -59,6 +59,7 @@ function nextShiftLabel() {
 }
 
 
+function sendPush(title, body) {
   if (Notification.permission === 'granted') new Notification(title, { body, icon: '/favicon.ico' });
 }
 
@@ -74,13 +75,14 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
   const [form,       setForm]       = useState({ pickup: '', dropoff: '' });
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [activeEntry,setActiveEntry]= useState(null); // queue_entries row
+  const [activeEntry,setActiveEntry]= useState(null);
   const [error,      setError]      = useState('');
   const [geoStatus,  setGeoStatus]  = useState('idle');
   const [geoInfo,    setGeoInfo]    = useState(null);
   const [geoError,   setGeoError]   = useState('');
   const [countAnim,  setCountAnim]  = useState(false);
   const [prevCount,  setPrevCount]  = useState(null);
+  const [showGrievance, setShowGrievance] = useState(false);
 
   const studentId = decodeToken(studentToken)?.id;
   const availableAutos = state?.available_autos ?? 0;
@@ -188,7 +190,10 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>
           👋 <span style={{ color: 'var(--text)', fontWeight: 600 }}>{studentName}</span>
         </div>
-        <button onClick={onLogout} style={btnSmall}>Sign Out</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowGrievance(true)} style={{ ...btnSmall, color: 'var(--red)', borderColor: 'rgba(255,77,109,0.3)' }}>⚠️ Report</button>
+          <button onClick={onLogout} style={btnSmall}>Sign Out</button>
+        </div>
       </div>
 
       {/* Hero — Available Autos */}
@@ -408,6 +413,16 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
           </div>
         </div>
       )}
+
+      {/* Grievance Modal */}
+      {showGrievance && (
+        <GrievanceModal
+          backend={backend}
+          studentToken={studentToken}
+          recentTrips={state?.trips?.filter(t => t.student_id === decodeToken(studentToken)?.id) || []}
+          onClose={() => setShowGrievance(false)}
+        />
+      )}
     </div>
   );
 }
@@ -525,6 +540,123 @@ function ActiveEntryCard({ entry, onCancel, cancelling, state }) {
         <button onClick={onCancel} disabled={cancelling} style={cancelBtn(cancelling)}>
           {cancelling ? 'Leaving…' : '✕  Leave Queue'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Grievance Modal ───────────────────────────────────────────────────────────
+function GrievanceModal({ backend, studentToken, recentTrips, onClose }) {
+  const [category,    setCategory]    = useState('');
+  const [description, setDescription] = useState('');
+  const [tripId,      setTripId]      = useState('');
+  const [submitting,  setSubmitting]  = useState(false);
+  const [error,       setError]       = useState('');
+  const [done,        setDone]        = useState(false);
+
+  const CATEGORIES = ['Driver behaviour', 'Vehicle condition', 'Long wait time', 'Route issue', 'Other'];
+
+  const handleSubmit = async () => {
+    if (!category)               return setError('Please select a category');
+    if (description.trim().length < 10) return setError('Please describe the issue (min 10 characters)');
+    setSubmitting(true); setError('');
+    try {
+      const res = await fetch(`${backend}/api/grievance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${studentToken}` },
+        body: JSON.stringify({ category, description: description.trim(), trip_id: tripId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data.error || 'Could not submit');
+      else setDone(true);
+    } catch { setError('Could not connect to server'); }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000,
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '0 0 0 0' }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width: '100%', maxWidth: 480, background: 'var(--surface)',
+        borderRadius: '24px 24px 0 0', padding: '28px 24px 40px',
+        border: '1px solid var(--border)', animation: 'float-up 0.3s ease both' }}>
+
+        {done ? (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ fontSize: 44, marginBottom: 14 }}>✅</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: 'var(--text)', marginBottom: 8 }}>
+              Report Submitted
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 24, lineHeight: 1.6 }}>
+              Your grievance has been sent to the admin. We'll look into it.
+            </div>
+            <button onClick={onClose} style={{ padding: '11px 28px', borderRadius: 10, border: 'none',
+              background: 'var(--amber)', color: '#0a0a0f', fontFamily: 'var(--font-display)',
+              fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Done</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>
+                ⚠️ Report an Issue
+              </div>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <Label>CATEGORY</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+              {CATEGORIES.map(c => (
+                <button key={c} onClick={() => setCategory(c)}
+                  style={{ padding: '7px 14px', borderRadius: 20, border: `1px solid ${category === c ? 'var(--red)' : 'var(--border)'}`,
+                    background: category === c ? 'var(--red-dim)' : 'var(--bg3)',
+                    color: category === c ? 'var(--red)' : 'var(--text-dim)',
+                    fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
+                  {c}
+                </button>
+              ))}
+            </div>
+
+            <Label>DESCRIPTION</Label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Describe what happened…"
+              rows={4}
+              style={{ width: '100%', padding: '12px 14px', background: 'var(--bg3)',
+                border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)',
+                fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none',
+                resize: 'vertical', boxSizing: 'border-box', marginBottom: 16 }}
+            />
+
+            {recentTrips.length > 0 && (
+              <>
+                <Label>LINK TO A TRIP (OPTIONAL)</Label>
+                <select value={tripId} onChange={e => setTripId(e.target.value)}
+                  style={{ width: '100%', padding: '10px 14px', background: 'var(--bg3)',
+                    border: '1px solid var(--border)', borderRadius: 10, color: tripId ? 'var(--text)' : 'var(--text-faint)',
+                    fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none', marginBottom: 16 }}>
+                  <option value="">No specific trip</option>
+                  {recentTrips.slice(0, 5).map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.pickup} → {t.dropoff} · {new Date(t.completed_at).toLocaleDateString()}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            {error && <div style={{ ...errBox, marginBottom: 14 }}>{error}</div>}
+
+            <button onClick={handleSubmit} disabled={submitting}
+              style={{ width: '100%', padding: '13px', borderRadius: 12, border: 'none',
+                background: submitting ? 'var(--surface2)' : 'var(--red)',
+                color: submitting ? 'var(--text-faint)' : '#fff',
+                fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15,
+                cursor: submitting ? 'not-allowed' : 'pointer' }}>
+              {submitting ? 'Submitting…' : 'Submit Report'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

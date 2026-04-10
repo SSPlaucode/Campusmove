@@ -65,7 +65,15 @@ export default function AuthScreen({ backend, onAuth }) {
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ fontSize: 38, marginBottom: 10 }}>🛺</div>
+          <div style={{ display: 'inline-block', marginBottom: 14 }}>
+            <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="72" height="72" rx="18" fill="#0a0a0f"/>
+              <rect x="1" y="1" width="70" height="70" rx="17" stroke="#f5a623" strokeWidth="1.5"/>
+              <text x="36" y="50" textAnchor="middle" fontFamily="system-ui,sans-serif" fontSize="28" fontWeight="800" fill="#f5a623">CM</text>
+              <rect x="6" y="58" width="14" height="2.5" rx="1.25" fill="#f5a623" opacity="0.7"/>
+              <rect x="6" y="63" width="10" height="2" rx="1" fill="#f5a623" opacity="0.4"/>
+            </svg>
+          </div>
           <h1 style={{
             fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 24,
             color: 'var(--text)', letterSpacing: '-0.5px', marginBottom: 4,
