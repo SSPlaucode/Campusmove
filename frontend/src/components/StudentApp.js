@@ -91,8 +91,14 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
     if (!state?.queues || !studentId) return;
     let found = null;
     for (const entries of Object.values(state.queues)) {
-      const mine = entries.find(e => e.student_id === studentId && ['waiting','dispatched','started'].includes(e.status));
-      if (mine) { found = mine; break; }
+      const idx = entries.findIndex(e => e.student_id === studentId && ['waiting','dispatched','started'].includes(e.status));
+      if (idx !== -1) {
+        // Compute position (1-based) and queue_size from the live queue array
+        const position = idx + 1;
+        const queue_size = entries.length;
+        found = { ...entries[idx], position, queue_size };
+        break;
+      }
     }
     setActiveEntry(found || null);
   }, [state, studentId]);
@@ -495,7 +501,7 @@ function ActiveEntryCard({ entry, onCancel, cancelling, state }) {
         {/* Position badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--amber-dim)', border: '2px solid var(--amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, color: 'var(--amber)', lineHeight: 1 }}>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: position >= 10 ? 20 : 30, color: 'var(--amber)', lineHeight: 1 }}>
               #{position || '—'}
             </span>
           </div>
