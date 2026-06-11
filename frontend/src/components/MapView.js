@@ -45,7 +45,7 @@ export default function MapView({ autos }) {
             box-shadow: 0 2px 8px rgba(0,0,0,0.5);
           ">${name}</div>`,
           className: '',
-          iconAnchor: [0, 0],
+          iconAnchor: [0, 20],
         });
         stopMarkersRef.current.push(L.marker([pos.lat, pos.lng], { icon }).addTo(map));
       });
