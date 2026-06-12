@@ -206,22 +206,8 @@ function getDemandForecast() {
   };
 }
 
-// ── GPS Simulation ────────────────────────────────────────────────────────────
-async function simulateAutoPositions() {
-  const client = await pool.connect();
-  try {
-    const { rows } = await client.query("SELECT * FROM autos WHERE status = 'on_trip'");
-    for (const auto of rows) {
-      const newLat = auto.lat + (Math.random() - 0.5) * 0.0002;
-      const newLng = auto.lng + (Math.random() - 0.5) * 0.0002;
-      await client.query('UPDATE autos SET lat=$1, lng=$2 WHERE id=$3', [newLat, newLng, auto.id]);
-    }
-    if (rows.length > 0) broadcast();
-  } finally {
-    client.release();
-  }
-}
-setInterval(simulateAutoPositions, 8000);
+// GPS simulation removed — real driver coordinates are streamed from
+// the driver's browser via POST /api/driver/location every 10 seconds.
 
 // ── EV Schedule Job ───────────────────────────────────────────────────────────
 // EV autos run: 08:30–10:30 and 15:30–18:00 (IST)
