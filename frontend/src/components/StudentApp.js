@@ -100,7 +100,13 @@ export default function StudentApp({ state, backend, onRefetch, lastUpdate, offl
         break;
       }
     }
-    setActiveEntry(found || null);
+    // Fire dispatch notification exactly once when status transitions to dispatched
+    setActiveEntry(prev => {
+      if (found?.status === 'dispatched' && prev?.status === 'waiting') {
+        sendPush('🛺 Your ride is on the way!', `Head to ${found.pickup} — your rickshaw has been dispatched.`);
+      }
+      return found || null;
+    });
   }, [state, studentId]);
 
   useEffect(() => { if ('Notification' in window) Notification.requestPermission(); }, []);
