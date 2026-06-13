@@ -114,6 +114,7 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
   const tabs = [
     { id: 'queues',     label: '📋 Queues'     },
     { id: 'fleet',      label: '🛺 Fleet'      },
+    { id: 'analytics',  label: '📊 Analytics'  },
     { id: 'forecast',   label: '📈 Forecast'   },
     { id: 'grievances', label: '⚠️ Reports'    },
     { id: 'drivers',    label: '🔑 Drivers'    },
@@ -300,6 +301,11 @@ function AdminDashboard({ state, backend, onRefetch, adminToken, onLogout }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Analytics Tab ── */}
+      {tab === 'analytics' && (
+        <AnalyticsPanel backend={backend} adminToken={adminToken} />
       )}
 
       {/* ── Forecast Tab ── */}
@@ -513,6 +519,140 @@ function GrievancesPanel({ backend, adminToken }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Analytics Panel ───────────────────────────────────────────────────────────
+function AnalyticsPanel({ backend, adminToken }) {
+  const [trips,   setTrips]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${backend}/api/trips`, { headers: { 'Authorization': `Bearer ${adminToken}` } })
+      .then(r => r.json())
+      .then(data => { setTrips(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading…</div>;
+  if (trips.length === 0) return (
+    <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-faint)', fontSize: 14 }}>
+      No completed trips yet
+    </div>
+  );
+
+  // ── Rides per day (last 7 days) ──
+  const dayMap = {};
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
+    dayMap[key] = 0;
+  }
+  trips.forEach(t => {
+    if (!t.completed_at) return;
+    const d = new Date(t.completed_at);
+    const key = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
+    if (key in dayMap) dayMap[key]++;
+  });
+  const ridesPerDay = Object.entries(dayMap).map(([day, rides]) => ({ day, rides }));
+
+  // ── Peak hours ──
+  const hourMap = {};
+  for (let h = 0; h < 24; h++) hourMap[h] = 0;
+  trips.forEach(t => {
+    if (!t.completed_at) return;
+    hourMap[new Date(t.completed_at).getHours()]++;
+  });
+  const peakHours = Object.entries(hourMap)
+    .filter(([, c]) => c > 0)
+    .map(([h, rides]) => ({ hour: `${h}:00`, rides }));
+
+  // ── Route popularity ──
+  const routeMap = {};
+  trips.forEach(t => {
+    const key = `${t.pickup} → ${t.dropoff}`;
+    routeMap[key] = (routeMap[key] || 0) + 1;
+  });
+  const routeData = Object.entries(routeMap)
+    .map(([route, rides]) => ({ route: route.replace('Main Gate ', 'MG').replace('Gaushala Road', 'GR').replace('Rajpur Khurd Road', 'RKR'), rides }))
+    .sort((a, b) => b.rides - a.rides);
+
+  // ── CSV Export ──
+  const exportCSV = () => {
+    const headers = ['Student Name', 'Pickup', 'Dropoff', 'Driver', 'Completed At'];
+    const rows = trips.map(t => [
+      t.student_name || '',
+      t.pickup || '',
+      t.dropoff || '',
+      t.driver_name || '',
+      t.completed_at ? new Date(t.completed_at).toLocaleString('en-IN') : '',
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `campusmove_trips_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <SectionLabel>ANALYTICS — LAST {trips.length} TRIPS</SectionLabel>
+        <button onClick={exportCSV} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(245,166,35,0.4)', background: 'var(--amber-dim)', color: 'var(--amber)', fontSize: 12, fontFamily: 'var(--font-display)', fontWeight: 700, cursor: 'pointer' }}>
+          ⬇ Export CSV
+        </button>
+      </div>
+
+      {/* Rides per day */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '16px 16px 8px', marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '1px', marginBottom: 12 }}>RIDES PER DAY (LAST 7 DAYS)</div>
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={ridesPerDay} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <XAxis dataKey="day" tick={{ fill: 'var(--text-faint)', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: 'var(--text-faint)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+            <Bar dataKey="rides" fill="var(--amber)" radius={[4,4,0,0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Peak hours */}
+      {peakHours.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '16px 16px 8px', marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '1px', marginBottom: 12 }}>PEAK HOURS</div>
+          <ResponsiveContainer width="100%" height={140}>
+            <BarChart data={peakHours} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <XAxis dataKey="hour" tick={{ fill: 'var(--text-faint)', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'var(--text-faint)', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+              <Bar dataKey="rides" fill="#4d9fff" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Route popularity */}
+      {routeData.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '16px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '1px', marginBottom: 12 }}>ROUTE POPULARITY</div>
+          {routeData.map((r, i) => {
+            const max = routeData[0].rides;
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text)' }}>{r.route}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>{r.rides} rides</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: 'var(--bg3)' }}>
+                  <div style={{ height: 6, borderRadius: 3, background: 'var(--amber)', width: `${(r.rides / max) * 100}%`, transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
