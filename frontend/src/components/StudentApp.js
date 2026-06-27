@@ -20,7 +20,7 @@ const VALID_ROUTES = [
 ];
 
 const STOP_NAMES   = Object.keys(STOPS);
-const GEOFENCE_M   = 500000;
+const GEOFENCE_M   = 150;
 const AVG_TRIP_MIN = 8; // used to estimate wait time per position
 
 function haversineDistance(lat1, lng1, lat2, lng2) {
